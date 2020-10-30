@@ -20,3 +20,6 @@ _FI void MemCpy(PVOID Dst, PVOID Src, ULONG Size) {
 	__movsb((PUCHAR)Dst, (const PUCHAR)Src, Size);
 }
 
+_FI void MemZero(PVOID Ptr, SIZE_T Size, UCHAR Filling = 0) {
+	__stosb((PUCHAR)Ptr, Filling, Size);
+}

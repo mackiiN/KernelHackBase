@@ -71,6 +71,12 @@
     </Link>
     <Link>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <EntryPointSymbol>DriverEntry</EntryPointSymbol>
+      <CETCompat>false</CETCompat>
+      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
+      <SubSystem>
+      </SubSystem>
+      <LargeAddressAware>true</LargeAddressAware>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -81,6 +87,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CRT.h" />
+    <ClInclude Include="CryptSTR.h" />
     <ClInclude Include="Global.h" />
     <ClInclude Include="Helpers.h" />
     <ClInclude Include="Internals.h" />

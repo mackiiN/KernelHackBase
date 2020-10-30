@@ -4,3 +4,5 @@ extern "C" int _fltused = 0;
 
 #include <ntifs.h>
 #include <intrin.h>
+
+#pragma comment(lib, "ntoskrnl.lib")
