@@ -1,8 +1,10 @@
 //DBG Help
+#ifdef DBG
 #define wsp(a) DbgPrintEx(0, 0, "\nFACE WSTR: %ws\n", (a))
 #define hp(a) DbgPrintEx(0, 0, "\nFACE HEX: 0x%p\n", (a))
 #define sp(a) DbgPrintEx(0, 0, "\nFACE STR: %s\n", (a))
 #define dp(a) DbgPrintEx(0, 0, "\nFACE DEC: %d\n", (a))
+#endif
 
 _FI PEPROCESS AttachToProcess(HANDLE PID)
 {
@@ -158,7 +160,7 @@ void CallUserMode(PVOID Func)
 {
 	//get user32 (KernelCallbackTable table ptr)
 	PEPROCESS Process = IoGetCurrentProcess();
-	PVOID ModBase = GetUserModuleBase(Process, E("user32.dll"));
+	PVOID ModBase = GetUserModuleBase(Process, E("user32"));
 	PVOID DataSect = FindSection(ModBase, E(".data"), nullptr);
 	ULONG64 AllocPtr = ((ULONG64)DataSect + 0x2000 - 0x8);
     ULONG64 CallBackPtr = (ULONG64)PsGetProcessPeb(Process)->KernelCallbackTable;
@@ -260,4 +262,22 @@ PVOID GetProcAdress(PVOID ModBase, const char* Name)
 
 	//no export
 	return nullptr;
+}
+
+PVOID GetKernelModuleBase(const char* ModName)
+{
+	PSYSTEM_MODULE_INFORMATION ModuleList = (PSYSTEM_MODULE_INFORMATION)NQSI(SystemModuleInformation);
+
+	PVOID ModuleBase = 0;
+	for (ULONG64 i = 0; i < ModuleList->ulModuleCount; i++)
+	{
+		SYSTEM_MODULE Module = ModuleList->Modules[i];
+		if (StrICmp(&Module.ImageName[Module.ModuleNameOffset], ModName, true)) {
+			ModuleBase = Module.Base;
+			break;
+		}
+	}
+
+	KFree(ModuleList);
+	return ModuleBase;
 }

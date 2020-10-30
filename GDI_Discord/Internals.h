@@ -376,6 +376,25 @@ typedef struct _IMAGE_EXPORT_DIRECTORY
 	ULONG   AddressOfNameOrdinals;
 } IMAGE_EXPORT_DIRECTORY, *PIMAGE_EXPORT_DIRECTORY;
 
+typedef struct _SYSTEM_MODULE
+{
+	ULONG_PTR Reserved[2];
+	PVOID Base;
+	ULONG Size;
+	ULONG Flags;
+	USHORT Index;
+	USHORT Unknown;
+	USHORT LoadCount;
+	USHORT ModuleNameOffset;
+	CHAR ImageName[256];
+} SYSTEM_MODULE, *PSYSTEM_MODULE;
+
+typedef struct _SYSTEM_MODULE_INFORMATION
+{
+	ULONG_PTR ulModuleCount;
+	SYSTEM_MODULE Modules[1];
+} SYSTEM_MODULE_INFORMATION, *PSYSTEM_MODULE_INFORMATION;
+
 #define RVA(Instr, InstrSize) ((DWORD64)Instr + InstrSize + *(LONG*)((DWORD64)Instr + (InstrSize - sizeof(LONG))))
 
 #define NT_HEADER(ModBase) (PIMAGE_NT_HEADERS)((ULONG64)(ModBase) + ((PIMAGE_DOS_HEADER)(ModBase))->e_lfanew)

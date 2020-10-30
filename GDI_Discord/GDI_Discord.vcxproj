@@ -92,6 +92,7 @@
     <ClInclude Include="Global.h" />
     <ClInclude Include="Helpers.h" />
     <ClInclude Include="Internals.h" />
+    <ClInclude Include="KGDI.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

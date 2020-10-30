@@ -27,5 +27,8 @@
     <ClInclude Include="CryptSTR.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="KGDI.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

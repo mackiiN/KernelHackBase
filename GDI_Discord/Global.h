@@ -4,5 +4,8 @@ extern "C" int _fltused = 0;
 
 #include <ntifs.h>
 #include <intrin.h>
+#include <windef.h>
 
 #pragma comment(lib, "ntoskrnl.lib")
+
+#define DBG 1

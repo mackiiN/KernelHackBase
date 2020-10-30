@@ -3,6 +3,7 @@
 #include "CryptSTR.h"
 #include "CRT.h"
 #include "Helpers.h"
+#include "KGDI.h"
 
 //tmp hook data
 PVOID* xKdEnumerateDebuggingDevicesPtr;
@@ -13,12 +14,12 @@ bool SetupKernelThread(PVOID KBase, PVOID ThreadStartAddr)
 {
 	//get thread fake start address
 	PVOID hMsVCRT = nullptr;
-	auto Process = GetProcessWModule(E("explorer.exe"), E("msvcrt.dll"), &hMsVCRT);
+	auto Process = GetProcessWModule(E("explorer.exe"), E("msvcrt"), &hMsVCRT);
 	auto FakeStartAddr = (PUCHAR)GetProcAdress(hMsVCRT, E("_endthreadex")) + 0x30;
 
 	//get usermode func
 	auto Var = UAlloc(0x1000); HANDLE Thread = nullptr;
-	auto hNtdll = GetUserModuleBase(Process, E("ntdll.dll"));
+	auto hNtdll = GetUserModuleBase(Process, E("ntdll"));
 	auto CallBack = GetProcAdress(hNtdll, E("NtQueryAuxiliaryCounterFrequency"));
 
 	//set kernel hook
@@ -67,14 +68,41 @@ NTSTATUS FakeThread()
 	xKdEnumerateDebuggingDevicesPtr = nullptr; xKdEnumerateDebuggingDevicesVal = nullptr;
 
 	//create gui thread context
-	auto hNtdll = GetUserModuleBase(IoGetCurrentProcess(), E("user32.dll"));
+	auto hNtdll = GetUserModuleBase(IoGetCurrentProcess(), E("user32"));
 	auto CallBack = GetProcAdress(hNtdll, E("GetForegroundWindow"));
 	CallUserMode(CallBack);
+
+	//get target process
+	NewScan: PVOID DiscordBuffer = nullptr;
+	auto TargetProc = GetProcessWModule("ConsoleApplication8.exe", E("DiscordHook64"), nullptr);
+
+	//find discord texture
+	ULONG64 Addr = 0;
+	do 
+	{
+		MEMORY_BASIC_INFORMATION MemInfo{}; SIZE_T RetSize;
+		if (NT_SUCCESS(ZwQueryVirtualMemory(ZwCurrentProcess(), (PVOID)Addr, MemoryBasicInformation, &MemInfo, 48, &RetSize))) {
+			if ((MemInfo.Type & (MEM_COMMIT | MEM_MAPPED)) &&
+				(MemInfo.Protect & PAGE_READWRITE) &&
+				(MemInfo.RegionSize == 0x3201000)) {
+				DiscordBuffer = MemInfo.AllocationBase;
+			} Addr += MemInfo.RegionSize;
+		} else Addr += PAGE_SIZE;
+	} while (Addr < (ULONG_PTR)0x7FFFFFFEFFFFi64);
+
+	//detach & check found
+	DetachFromProcess(TargetProc);
+	if (!DiscordBuffer) 
+		goto NewScan;
+
+	//Render gRender{};
 
 	//your cheat
 	//while (true)
 	{
-		sp("hook!1!");
+
+
+		//sp("hook!1!");
 
 		//gRender.NewFrame(1024, 768);
 
@@ -88,6 +116,8 @@ NTSTATUS FakeThread()
 
 		//Sleep(1);
 	}
+
+	hp(DiscordBuffer);
 
 	//enable all apc
 	KeLeaveGuardedRegion();
