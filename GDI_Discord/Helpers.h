@@ -281,3 +281,18 @@ PVOID GetKernelModuleBase(const char* ModName)
 	KFree(ModuleList);
 	return ModuleBase;
 }
+
+template <typename Type>
+_FI Type EPtr(Type Ptr) {
+	auto Key = (ULONG64)SharedUserData->Cookie *
+		                SharedUserData->Cookie *
+		                SharedUserData->Cookie *
+		                SharedUserData->Cookie;
+	return (Type)((ULONG64)Ptr ^ Key);
+}
+
+template<typename Ret = void, typename... ArgT>
+_FI Ret CallPtr(PVOID Fn, ArgT... Args) {
+	typedef Ret(*ShellFn)(ArgT...);
+	return ((ShellFn)Fn)(Args...);
+}

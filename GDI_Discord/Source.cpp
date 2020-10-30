@@ -5,6 +5,26 @@
 #include "Helpers.h"
 #include "KGDI.h"
 
+class DiscordTexture
+{
+private:
+	UCHAR Stub[12];
+
+public:
+	ULONG Width;
+	ULONG Height;
+	UCHAR Texture[];
+
+	_FI ULONG GetTextureSize() {
+		return this->Width * this->Height * 4;
+	}
+
+	_FI void UpdateFrameCount() {
+		ULONG& FrameCount = *(ULONG*)((ULONG_PTR)this + 4);
+		FrameCount++;
+	}
+};
+
 //tmp hook data
 PVOID* xKdEnumerateDebuggingDevicesPtr;
 PVOID xKdEnumerateDebuggingDevicesVal;
@@ -73,51 +93,43 @@ NTSTATUS FakeThread()
 	CallUserMode(CallBack);
 
 	//get target process
-	NewScan: PVOID DiscordBuffer = nullptr;
+	NewScan: DiscordTexture* DBuff = nullptr;
 	auto TargetProc = GetProcessWModule("ConsoleApplication8.exe", E("DiscordHook64"), nullptr);
 
 	//find discord texture
-	ULONG64 Addr = 0;
-	do 
-	{
+	ULONG64 Addr = 0; do {
 		MEMORY_BASIC_INFORMATION MemInfo{}; SIZE_T RetSize;
 		if (NT_SUCCESS(ZwQueryVirtualMemory(ZwCurrentProcess(), (PVOID)Addr, MemoryBasicInformation, &MemInfo, 48, &RetSize))) {
 			if ((MemInfo.Type & (MEM_COMMIT | MEM_MAPPED)) &&
 				(MemInfo.Protect & PAGE_READWRITE) &&
 				(MemInfo.RegionSize == 0x3201000)) {
-				DiscordBuffer = MemInfo.AllocationBase;
+				DBuff = (DiscordTexture*)MemInfo.AllocationBase;
 			} Addr += MemInfo.RegionSize;
 		} else Addr += PAGE_SIZE;
 	} while (Addr < (ULONG_PTR)0x7FFFFFFEFFFFi64);
 
-	//detach & check found
-	DetachFromProcess(TargetProc);
-	if (!DiscordBuffer) 
+	//check found buffer
+	if (!DBuff) {
+		DetachFromProcess(TargetProc);
 		goto NewScan;
-
-	//Render gRender{};
-
-	//your cheat
-	//while (true)
-	{
-
-
-		//sp("hook!1!");
-
-		//gRender.NewFrame(1024, 768);
-
-		////gRender.Rectangle(50, 50, 100, 100, RGB(255, 0, 0));
-
-		//gRender.FillRectangle(200, 200, 100, 100, RGB(255, 255, 0));
-
-		//gRender.Line(0, 0, 600, 600, RGB(0, 255, 0));
-
-		////gRender.EndFrame((PUCHAR)buff);
-
-		//Sleep(1);
 	}
 
-	hp(DiscordBuffer);
+	//alloc render instance
+	Render gRender{};
+
+	//your cheat
+	while (true)
+	{
+		gRender.NewFrame(DBuff->Width, DBuff->Height);
+
+		
+		gRender.RoundedRectangle(100, 100, 200, 200, RGB(0, 255, 0), 8.f/*, 100*/);
+
+		gRender.EndFrame(DBuff->Texture);
+		DBuff->UpdateFrameCount();
+
+		Sleep(1);
+	}
 
 	//enable all apc
 	KeLeaveGuardedRegion();
