@@ -63,7 +63,7 @@ NTSTATUS FakeThread()
 
 	//unhook kernel hook
 	_InterlockedExchangePointer(xKdEnumerateDebuggingDevicesPtr, xKdEnumerateDebuggingDevicesVal);
-	xKdEnumerateDebuggingDevicesPtr = 0; xKdEnumerateDebuggingDevicesVal = 0;
+	xKdEnumerateDebuggingDevicesPtr = nullptr; xKdEnumerateDebuggingDevicesVal = nullptr;
 
 	//create gui thread context
 	auto hNtdll = GetUserModuleBase(IoGetCurrentProcess(), E("user32.dll"));

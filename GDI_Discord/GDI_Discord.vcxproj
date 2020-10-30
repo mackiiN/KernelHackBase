@@ -74,8 +74,7 @@
       <EntryPointSymbol>DriverEntry</EntryPointSymbol>
       <CETCompat>false</CETCompat>
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
-      <SubSystem>
-      </SubSystem>
+      <SubSystem>Native</SubSystem>
       <LargeAddressAware>true</LargeAddressAware>
     </Link>
   </ItemDefinitionGroup>
