@@ -44,6 +44,7 @@
     <IntDir>$(SolutionDir)$(Platform)\</IntDir>
     <TargetName>LIL_HDD</TargetName>
     <OutDir>$(SolutionDir)$(Platform)\</OutDir>
+    <GenerateManifest>false</GenerateManifest>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -76,6 +77,7 @@
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
       <SubSystem>Native</SubSystem>
       <LargeAddressAware>true</LargeAddressAware>
+      <AdditionalOptions>/EMITPOGOPHASEINFO %(AdditionalOptions)</AdditionalOptions>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

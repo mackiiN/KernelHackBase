@@ -1,5 +1,4 @@
 #include "Global.h"
-
 #include "Internals.h"
 #include "CryptSTR.h"
 #include "CRT.h"
@@ -9,6 +8,7 @@
 PVOID* xKdEnumerateDebuggingDevicesPtr;
 PVOID xKdEnumerateDebuggingDevicesVal;
 
+//create thread meme
 bool SetupKernelThread(PVOID KBase, PVOID ThreadStartAddr)
 {
 	//get thread fake start address
@@ -56,6 +56,7 @@ bool SetupKernelThread(PVOID KBase, PVOID ThreadStartAddr)
 	return (bool)Thread;
 }
 
+//meme thread
 NTSTATUS FakeThread()
 {
 	//disable apc
