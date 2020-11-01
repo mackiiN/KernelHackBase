@@ -39,8 +39,8 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <DebuggerFlavor>DbgengKernelDebugger</DebuggerFlavor>
     <TargetExt>.sys</TargetExt>
-    <IncludePath>C:\Program Files %28x86%29\Windows Kits\10\Include\10.0.19041.0\km;$(IncludePath)</IncludePath>
-    <LibraryPath>C:\Program Files %28x86%29\Windows Kits\10\Lib\10.0.19041.0\km\x64;C:\Program Files %28x86%29\Windows Kits\10\Lib\10.0.18362.0\km\x64;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(windowssdkdir_10)include\$(targetplatformversion)\km;$(IncludePath)</IncludePath>
+    <LibraryPath>$(windowssdkdir_10)lib\$(targetplatformversion)\km\x64;$(LibraryPath)</LibraryPath>
     <IntDir>$(SolutionDir)$(Platform)\</IntDir>
     <TargetName>LIL_HDD</TargetName>
     <OutDir>$(SolutionDir)$(Platform)\</OutDir>
