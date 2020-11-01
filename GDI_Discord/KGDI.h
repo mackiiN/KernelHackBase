@@ -25,12 +25,15 @@ PVOID ResolveWin32k(const char* Name)
 class Render
 {
 private:
+    int ScrScale;
     HDC ScreenDC;
     HPEN NullPen;
     int CurrentWidth;
     int CurrentHeight;
     PBYTE MappedTexture;
     HBITMAP ScreenBitmap;
+    PBYTE ScaleMappedTexture;
+    HBITMAP ScaleScreenBitmap;
 
     //internals
     HPEN CreatePenInternal(int Style, int Width, COLORREF Color)
@@ -132,6 +135,16 @@ private:
         RemoveObjInternal(Brush);
     }
 
+    HBITMAP SelectBitMapInternal(HBITMAP BitMap)
+    {
+        static PVOID NtGdiSelectBitmap_Fn = nullptr;
+        if(!NtGdiSelectBitmap_Fn){
+            NtGdiSelectBitmap_Fn = EPtr(ResolveWin32k(E("NtGdiSelectBitmap")));
+        }
+        
+        return CallPtr<HBITMAP>(EPtr(NtGdiSelectBitmap_Fn), EPtr(ScreenDC), BitMap);
+    }
+
     //Fast Math
     _FI float CosAdd(float x) {
         float x2 = x * x;
@@ -162,7 +175,7 @@ private:
 
 public:
     //mgr
-    void Init(int Width, int Height)
+    void Init(int Width, int Height, int Scale = 1)
     {
         //simple resize
         if (!ScreenDC)
@@ -175,7 +188,7 @@ public:
             NullPen = (HPEN)EPtr(GetStockObjectInternal(8/*NULL_PEN*/));
         }
 
-        //create bitmap
+        //create bitmap (org size)
         PBITMAPINFO InfoUser = (PBITMAPINFO)UAlloc(4096);
         InfoUser->bmiHeader.biSize = 40;
         InfoUser->bmiHeader.biWidth = Width;
@@ -188,14 +201,28 @@ public:
         PVOID NtGdiCreateDIBSection_Fn = ResolveWin32k(E("NtGdiCreateDIBSection"));
         ScreenBitmap = EPtr(CallPtr<HBITMAP>(NtGdiCreateDIBSection_Fn, ScreenDC, nullptr, 0, InfoUser, 0, 40, 0, 0, MappedTextureUser));
         MappedTexture = EPtr((PBYTE)*MappedTextureUser);
+
+        //add scale
+        if (Scale > 1)
+        {
+            //create bitmap (scale size)
+            InfoUser->bmiHeader.biWidth = Width * Scale;
+            InfoUser->bmiHeader.biHeight = -(Height * Scale);
+            InfoUser->bmiHeader.biSizeImage = (Width * Scale) * (Height * Scale) * 4;
+            ScaleScreenBitmap = EPtr(CallPtr<HBITMAP>(NtGdiCreateDIBSection_Fn, ScreenDC, nullptr, 0, InfoUser, 0, 40, 0, 0, MappedTextureUser));
+            ScaleMappedTexture = EPtr((PBYTE)*MappedTextureUser);
+            
+            //SetStretchBltMode(memDC1, HALFTONE);
+        } 
+        
+        //cleanup
         UFree(InfoUser);
 
         //select backbuffer
-        PVOID NtGdiSelectBitmap_Fn = ResolveWin32k(E("NtGdiSelectBitmap"));
-        auto GBitMap = CallPtr<HBITMAP>(NtGdiSelectBitmap_Fn, EPtr(ScreenDC), EPtr(ScreenBitmap));
-        RemoveObjInternal(GBitMap);
+        RemoveObjInternal(SelectBitMapInternal(EPtr(((Scale > 1) ? ScaleScreenBitmap : ScreenBitmap))));
 
         //save vars
+        ScrScale = Scale;
         CurrentWidth = Width;
         CurrentHeight = Height;
     }
@@ -213,6 +240,14 @@ public:
         //flush all batches
         //GdiFlush();
 
+        //apply extrasampling
+        if (ScrScale > 1)
+        {
+            auto SBitMap = SelectBitMapInternal(EPtr(ScreenBitmap));
+            //StretchDIBits
+            SelectBitMapInternal(SBitMap);
+        }
+        
         //fix alpha & copy & clear buffer (BUG: no black color)
         for (ULONG i = 0; i < CurrentWidth * CurrentHeight * 4; i += 8/*2 pixels*/)
         {
@@ -222,7 +257,7 @@ public:
 
             //fix alpha
             if (Pixel1) Buffer[i + 3] = 0xFF;
-            if (Pixel1) Buffer[i + 7] = 0xFF;
+            if (Pixel2) Buffer[i + 7] = 0xFF;
 
             //reset pixels
             *(ULONG*)&MappedTextureDecrt[i] = 0;
@@ -240,11 +275,11 @@ public:
     {
         //gen dots
         POINT Dots[2];
-        Dots[0] = { x0, y0 };
-        Dots[1] = { x1, y1 };
+        Dots[0] = { x0 * ScrScale, y0 * ScrScale };
+        Dots[1] = { x1 * ScrScale, y1 * ScrScale };
 
         //draw polyline
-        PolyLineInternal(Dots, 2, Thick, Color);
+        PolyLineInternal(Dots, 2, Thick * ScrScale, Color);
     }
 
     //render circle
