@@ -25,9 +25,11 @@ PVOID ResolveWin32k(const char* Name)
 class Render
 {
 private:
-    int ScrScale;
     HDC ScreenDC;
     HPEN NullPen;
+    int ScrScale;
+    PVOID UserBuffer;
+
     int CurrentWidth;
     int CurrentHeight;
     PBYTE MappedTexture;
@@ -175,21 +177,20 @@ private:
 
 public:
     //mgr
-    void Init(int Width, int Height, int Scale = 1)
+    void Init(int Width, int Height, int Scale)
     {
-        //simple resize
-        if (!ScreenDC)
-        {
-            //create dc
-            PVOID CreateCompatibleDC_Fn = ResolveWin32k(E("NtGdiCreateCompatibleDC"));
-            ScreenDC = EPtr(CallPtr<HDC>(CreateCompatibleDC_Fn, nullptr));
+        //create dc
+        PVOID CreateCompatibleDC_Fn = ResolveWin32k(E("NtGdiCreateCompatibleDC"));
+        ScreenDC = EPtr(CallPtr<HDC>(CreateCompatibleDC_Fn, nullptr));
 
-            //get null pen & null brush
-            NullPen = (HPEN)EPtr(GetStockObjectInternal(8/*NULL_PEN*/));
-        }
+        //get null pen & null brush
+        NullPen = (HPEN)EPtr(GetStockObjectInternal(8/*NULL_PEN*/));
+
+        //alloc usermode buff
+        UserBuffer = EPtr(UAlloc(4096));
 
         //create bitmap (org size)
-        PBITMAPINFO InfoUser = (PBITMAPINFO)UAlloc(4096);
+        PBITMAPINFO InfoUser = (PBITMAPINFO)EPtr(UserBuffer);
         InfoUser->bmiHeader.biSize = 40;
         InfoUser->bmiHeader.biWidth = Width;
         InfoUser->bmiHeader.biHeight = -Height;
@@ -199,7 +200,7 @@ public:
         InfoUser->bmiHeader.biSizeImage = Width * Height * 4;
         PVOID* MappedTextureUser = (PVOID*)((ULONG64)InfoUser + 0x800);
         PVOID NtGdiCreateDIBSection_Fn = ResolveWin32k(E("NtGdiCreateDIBSection"));
-        ScreenBitmap = EPtr(CallPtr<HBITMAP>(NtGdiCreateDIBSection_Fn, ScreenDC, nullptr, 0, InfoUser, 0, 40, 0, 0, MappedTextureUser));
+        ScreenBitmap = EPtr(CallPtr<HBITMAP>(NtGdiCreateDIBSection_Fn, EPtr(ScreenDC), nullptr, 0, InfoUser, 0, 40, 0, 0, MappedTextureUser));
         MappedTexture = EPtr((PBYTE)*MappedTextureUser);
 
         //add scale
@@ -209,14 +210,17 @@ public:
             InfoUser->bmiHeader.biWidth = Width * Scale;
             InfoUser->bmiHeader.biHeight = -(Height * Scale);
             InfoUser->bmiHeader.biSizeImage = (Width * Scale) * (Height * Scale) * 4;
-            ScaleScreenBitmap = EPtr(CallPtr<HBITMAP>(NtGdiCreateDIBSection_Fn, ScreenDC, nullptr, 0, InfoUser, 0, 40, 0, 0, MappedTextureUser));
+            ScaleScreenBitmap = EPtr(CallPtr<HBITMAP>(NtGdiCreateDIBSection_Fn, EPtr(ScreenDC), nullptr, 0, InfoUser, 0, 40, 0, 0, MappedTextureUser));
             ScaleMappedTexture = EPtr((PBYTE)*MappedTextureUser);
             
-            //SetStretchBltMode(memDC1, HALFTONE);
+            //GreSetStretchBltMode
+            auto win32kFull = GetKernelModuleBase(E("win32kfull.sys"));
+            auto GreSetStretchBltMode = (PVOID)RVA(FindPatternSect(win32kFull, E(".text"), E("E8 ? ? ? ? 48 8B D7 89 84")), 5);
+            CallPtr(GreSetStretchBltMode, EPtr(ScreenDC), HALFTONE);
         } 
         
-        //cleanup
-        UFree(InfoUser);
+        //cleanup 
+        MemZero(InfoUser, 0x808/*https://en.wikipedia.org/wiki/808_Mafia*/);
 
         //select backbuffer
         RemoveObjInternal(SelectBitMapInternal(EPtr(((Scale > 1) ? ScaleScreenBitmap : ScreenBitmap))));
@@ -227,28 +231,49 @@ public:
         CurrentHeight = Height;
     }
 
-    _FI void NewFrame(int Width, int Height) {
-        if ((Width != CurrentWidth) || (Height != CurrentHeight)) {
-            Init(Width, Height);
+    _FI void NewFrame(int Width, int Height, int Scale = 1) {
+        if ((Width != CurrentWidth) || (Height != CurrentHeight)) 
+        {
+            //cleanup
+            Release();
+
+            //setup render
+            Init(Width, Height, Scale);
         }
     }
 
     void EndFrame(PBYTE Buffer)
     {
-        auto MappedTextureDecrt = EPtr(MappedTexture);
-
-        //flush all batches
-        //GdiFlush();
-
-        //apply extrasampling
+        //apply extrasampling (if need)
         if (ScrScale > 1)
         {
+            //select original bitmap
             auto SBitMap = SelectBitMapInternal(EPtr(ScreenBitmap));
-            //StretchDIBits
+
+            //NtGdiStretchDIBitsInternal
+            static PVOID NtGdiStretchDIBitsInternal_Fn = 0;
+            if (!NtGdiStretchDIBitsInternal_Fn) {
+                NtGdiStretchDIBitsInternal_Fn = EPtr(ResolveWin32k(E("NtGdiStretchDIBitsInternal")));
+            }
+
+            //resize bitmap
+            PBITMAPINFO InfoUser = (PBITMAPINFO)EPtr(UserBuffer);
+            InfoUser->bmiHeader.biSize = 40;
+            InfoUser->bmiHeader.biWidth = (CurrentWidth * ScrScale);
+            InfoUser->bmiHeader.biHeight = -(CurrentHeight * ScrScale);
+            InfoUser->bmiHeader.biPlanes = 1;
+            InfoUser->bmiHeader.biBitCount = 32;
+            InfoUser->bmiHeader.biCompression = 0;
+            InfoUser->bmiHeader.biSizeImage = (CurrentWidth * ScrScale) * (CurrentHeight * ScrScale) * 4;
+            CallPtr(EPtr(NtGdiStretchDIBitsInternal_Fn), EPtr(ScreenDC), 0, 0, CurrentWidth, CurrentHeight, 0, 0, CurrentWidth * ScrScale, CurrentHeight * ScrScale, EPtr(ScaleMappedTexture), InfoUser, 0, SRCCOPY, 40, InfoUser->bmiHeader.biSizeImage, 0ull);
+            
+            //cleanup & restore bitmap
+            MemZero(InfoUser, sizeof(BITMAPINFO));
             SelectBitMapInternal(SBitMap);
         }
         
         //fix alpha & copy & clear buffer (BUG: no black color)
+        auto MappedTextureDecrt = EPtr(MappedTexture);
         for (ULONG i = 0; i < CurrentWidth * CurrentHeight * 4; i += 8/*2 pixels*/)
         {
             //copy pixels
@@ -266,25 +291,40 @@ public:
     }
 
     void Release() {
-        RemoveObjInternal(ScreenBitmap);
-        RemoveObjInternal(ScreenDC);
+        RemoveObjInternal(EPtr(ScaleScreenBitmap));
+        RemoveObjInternal(EPtr(ScreenBitmap));
+        RemoveObjInternal(EPtr(ScreenDC));
+        UFree(UserBuffer);
     }
 
     //render line
     void Line(int x0, int y0, int x1, int y1, COLORREF Color, int Thick = 1)
     {
+        //apply scale
+        x0 *= ScrScale;
+        y0 *= ScrScale;
+        x1 *= ScrScale;
+        y1 *= ScrScale;
+        Thick *= ScrScale;
+
         //gen dots
         POINT Dots[2];
-        Dots[0] = { x0 * ScrScale, y0 * ScrScale };
-        Dots[1] = { x1 * ScrScale, y1 * ScrScale };
+        Dots[0] = { x0, y0 };
+        Dots[1] = { x1, y1 };
 
         //draw polyline
-        PolyLineInternal(Dots, 2, Thick * ScrScale, Color);
+        PolyLineInternal(Dots, 2, Thick, Color);
     }
 
     //render circle
     void Circle(int x, int y, COLORREF Color, float Radius, int Thick = 1)
     {
+        //apply scale
+        x *= ScrScale;
+        y *= ScrScale;
+        Thick *= ScrScale;
+        Radius *= ScrScale;
+
         //gen dots
         POINT Dots[120]; int NumDots = 0;
         for (float i = 0.f; i < 6.28f; i += .054f) {
@@ -303,6 +343,11 @@ public:
 
     void FillCircle(int x, int y, COLORREF Color, float Radius)
     {
+        //apply scale
+        x *= ScrScale;
+        y *= ScrScale;
+        Radius *= ScrScale;
+
         //gen dots
         POINT Dots[120]; int NumDots = 0;
         for (float i = 0.f; i < 6.28f; i += .054f) {
@@ -318,7 +363,14 @@ public:
 
     //render rectangle
     void Rectangle(int x, int y, int w, int h, COLORREF Color, int Thick = 1)
-    {
+    { 
+        //apply scale
+        x *= ScrScale;
+        y *= ScrScale;
+        w *= ScrScale;
+        h *= ScrScale;
+        Thick *= ScrScale;
+
         //gen dots
         POINT Dots[5];
         Dots[0] = { x, y };
@@ -333,6 +385,14 @@ public:
     
     void RoundedRectangle(int x, int y, int w, int h, COLORREF Color, float Radius, int Thick = 1) //shit
     {
+        //apply scale
+        x *= ScrScale;
+        y *= ScrScale;
+        w *= ScrScale;
+        h *= ScrScale;
+        Thick *= ScrScale;
+        Radius *= ScrScale;
+
         //gen dots
         POINT Add{};
         POINT Dots[25];
@@ -352,7 +412,7 @@ public:
         //fix end
         Dots[24] = Dots[0];
 
-        Line(Dots[16].x, Dots[16].y, Dots[22].x, Dots[22].y, RGB(255, 0, 0));
+        //Line(Dots[16].x, Dots[16].y, Dots[22].x, Dots[22].y, RGB(255, 0, 0));
 
         //draw polyline
         PolyLineInternal(Dots, 25, Thick, Color);
@@ -360,6 +420,12 @@ public:
 
     void FillRectangle(int x, int y, int w, int h, COLORREF Color)
     {
+        //apply scale
+        x *= ScrScale;
+        y *= ScrScale;
+        w *= ScrScale;
+        h *= ScrScale;
+
         //gen dots
         POINT Dots[4];
         Dots[0] = { x, y };
@@ -373,6 +439,13 @@ public:
 
     void FillRoundedRectangle(int x, int y, int w, int h, COLORREF Color, float Radius)
     {
+        //apply scale
+        x *= ScrScale;
+        y *= ScrScale;
+        w *= ScrScale;
+        h *= ScrScale; 
+        Radius *= ScrScale;
+
         //gen dots
         POINT Add{};
         POINT Dots[24];

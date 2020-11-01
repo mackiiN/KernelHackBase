@@ -120,10 +120,9 @@ NTSTATUS FakeThread()
 	//your cheat
 	while (true)
 	{
-		gRender.NewFrame(DBuff->Width, DBuff->Height);
+		gRender.NewFrame(DBuff->Width, DBuff->Height, 4);
 
-		
-		gRender.RoundedRectangle(100, 100, 200, 200, RGB(0, 255, 0), 8.f/*, 100*/);
+		gRender.FillRoundedRectangle(200, 200, 100, 100, RGB(0, 255, 0), 10/*, 100*/);
 
 		gRender.EndFrame(DBuff->Texture);
 		DBuff->UpdateFrameCount();
