@@ -25,6 +25,7 @@ PVOID ResolveWin32k(const char* Name)
 class Render
 {
 private:
+    HFONT Font;
     HDC ScreenDC;
     HPEN NullPen;
     int ScrScale;
@@ -177,14 +178,14 @@ private:
 
 public:
     //mgr
-    void Init(int Width, int Height, int Scale)
+    void Init(int Width, int Height, const wchar_t* FontName, int FontSize, int Scale)
     {
         //create dc
         PVOID CreateCompatibleDC_Fn = ResolveWin32k(E("NtGdiCreateCompatibleDC"));
         ScreenDC = EPtr(CallPtr<HDC>(CreateCompatibleDC_Fn, nullptr));
 
         //get null pen & null brush
-        NullPen = (HPEN)EPtr(GetStockObjectInternal(8/*NULL_PEN*/));
+        NullPen = (HPEN)EPtr(GetStockObjectInternal(NULL_PEN));
 
         //alloc usermode buff
         UserBuffer = EPtr(UAlloc(4096));
@@ -203,6 +204,9 @@ public:
         ScreenBitmap = EPtr(CallPtr<HBITMAP>(NtGdiCreateDIBSection_Fn, EPtr(ScreenDC), nullptr, 0, InfoUser, 0, 40, 0, 0, MappedTextureUser));
         MappedTexture = EPtr((PBYTE)*MappedTextureUser);
 
+        //get w32k base
+        auto win32kFull = GetKernelModuleBase(E("win32kfull.sys"));
+
         //add scale
         if (Scale > 1)
         {
@@ -214,16 +218,27 @@ public:
             ScaleMappedTexture = EPtr((PBYTE)*MappedTextureUser);
             
             //GreSetStretchBltMode
-            auto win32kFull = GetKernelModuleBase(E("win32kfull.sys"));
             auto GreSetStretchBltMode = (PVOID)RVA(FindPatternSect(win32kFull, E(".text"), E("E8 ? ? ? ? 48 8B D7 89 84")), 5);
             CallPtr(GreSetStretchBltMode, EPtr(ScreenDC), HALFTONE);
         } 
         
-        //cleanup 
+        //cleanup
         MemZero(InfoUser, 0x808/*https://en.wikipedia.org/wiki/808_Mafia*/);
 
         //select backbuffer
         RemoveObjInternal(SelectBitMapInternal(EPtr(((Scale > 1) ? ScaleScreenBitmap : ScreenBitmap))));
+
+        //create & select font
+        ENUMLOGFONTEXDVW EnumFont{};
+        EnumFont.elfEnumLogfontEx.elfLogFont.lfWeight = FW_MEDIUM;
+        EnumFont.elfEnumLogfontEx.elfLogFont.lfHeight = FontSize * Scale;
+        MemCpy(&EnumFont.elfEnumLogfontEx.elfLogFont.lfFaceName, (PVOID)FontName, (StrLen(FontName) + 1) * 2);
+        PVOID hfontCreate = ResolveWin32k(E("hfontCreate"));
+        PVOID NtGdiSelectFont = ResolveWin32k(E("NtGdiSelectFont"));
+        PVOID GreSetBkMode = (PVOID)RVA(FindPatternSect(win32kFull, E(".text"), E("E8 ? ? ? ? 89 45 7F")), 5);
+        Font = EPtr(CallPtr<HFONT>(hfontCreate, &EnumFont, 0ull, 0ull, 0ull, 0ull));
+        CallPtr<HFONT>(NtGdiSelectFont, EPtr(ScreenDC), EPtr(Font));
+        CallPtr(GreSetBkMode, EPtr(ScreenDC), TRANSPARENT);
 
         //save vars
         ScrScale = Scale;
@@ -231,14 +246,15 @@ public:
         CurrentHeight = Height;
     }
 
-    _FI void NewFrame(int Width, int Height, int Scale = 1) {
+    _FI void NewFrame(int Width, int Height, const wchar_t* FontName, int FontSize, int ExtraSample = 1)
+    {
         if ((Width != CurrentWidth) || (Height != CurrentHeight)) 
         {
             //cleanup
             Release();
 
             //setup render
-            Init(Width, Height, Scale);
+            Init(Width, Height, FontName, FontSize, ExtraSample);
         }
     }
 
@@ -294,6 +310,7 @@ public:
         RemoveObjInternal(EPtr(ScaleScreenBitmap));
         RemoveObjInternal(EPtr(ScreenBitmap));
         RemoveObjInternal(EPtr(ScreenDC));
+        RemoveObjInternal(EPtr(Font));
         UFree(UserBuffer);
     }
 
@@ -466,4 +483,35 @@ public:
         //draw polygon
         PolygonInternal(Dots, 24, Color);
     }
+
+    //render string
+    void String(int x, int y, const wchar_t* String, UINT Align = TA_LEFT, COLORREF Color = RGB(255, 255, 255)) 
+    {
+        //apply scale
+        x *= ScrScale;
+        y *= ScrScale;
+
+        //resolve functions
+        static PVOID GreSetTextAlign = nullptr;
+        static PVOID GreSetTextColor = nullptr;
+        static PVOID GreExtTextOutWInternal = nullptr;
+        if (!GreSetTextColor || !GreSetTextAlign || !GreExtTextOutWInternal) {
+            auto win32kFull = GetKernelModuleBase(E("win32kfull.sys"));
+            GreSetTextAlign = (PVOID)EPtr(RVA(FindPatternSect(win32kFull, E(".text"), E("E8 ? ? ? ? 89 5C 24 48 45")), 5));
+            GreExtTextOutWInternal = (PVOID)EPtr(RVA(FindPatternSect(win32kFull, E(".text"), E("E8 ? ? ? ? 49 83 C6 02 BB")), 5));
+            GreSetTextColor = (PVOID)EPtr(RVA(FindPatternSect(win32kFull, E(".text"), E("E8 ? ? ? ? BA ? ? ? ? 89 44 24 70")), 5));
+        }
+
+        //draw text
+        auto hDC = EPtr(ScreenDC);
+        CallPtr(EPtr(GreSetTextAlign), hDC, Align);
+        CallPtr(EPtr(GreSetTextColor), hDC, Color);
+        CallPtr(EPtr(GreExtTextOutWInternal), hDC, x, y, 0ull, 0ull, String, StrLen(String), 0ull, 0ull);
+    }
+
+   /* Vector2 GetTextSize(const wchar_t* String) {
+        SIZE TextSize = { 0 };
+        CallPtr<bool>(GreGetTextExtentW, ScreenDC, String, StrLen(String), &TextSize);
+        return { FLOAT(TextSize.cx), FLOAT(TextSize.cy) };
+    }*/
 };

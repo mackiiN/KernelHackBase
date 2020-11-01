@@ -16,6 +16,14 @@ _FI bool StrICmp(StrType Str, StrType2 InStr, bool Two)
 	return false;
 }
 
+template <typename StrType> 
+_FI int StrLen(StrType Str) {
+	if (!Str) return 0;
+	StrType Str2 = Str;
+	while (*Str2) *Str2++;
+	return (int)(Str2 - Str);
+}
+
 _FI void MemCpy(PVOID Dst, PVOID Src, ULONG Size) {
 	__movsb((PUCHAR)Dst, (const PUCHAR)Src, Size);
 }
