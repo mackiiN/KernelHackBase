@@ -91,6 +91,7 @@
     <ClInclude Include="CryptSTR.h" />
     <ClInclude Include="Global.h" />
     <ClInclude Include="Helpers.h" />
+    <ClInclude Include="HideImport.h" />
     <ClInclude Include="Internals.h" />
     <ClInclude Include="KGDI.h" />
   </ItemGroup>

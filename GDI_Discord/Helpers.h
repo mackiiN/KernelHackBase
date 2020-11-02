@@ -6,23 +6,32 @@
 #define dp(a) DbgPrintEx(0, 0, "\nFACE DEC: %d\n", (a))
 #endif
 
+template <typename Type>
+_FI Type EPtr(Type Ptr) {
+	auto Key = (ULONG64)SharedUserData->Cookie *
+		SharedUserData->Cookie *
+		SharedUserData->Cookie *
+		SharedUserData->Cookie;
+	return (Type)((ULONG64)Ptr ^ Key);
+}
+
 _FI PEPROCESS AttachToProcess(HANDLE PID)
 {
 	//get eprocess
 	PEPROCESS Process = nullptr;
-	if (PsLookupProcessByProcessId(PID, &Process) || !Process)
+	if (ImpCall(PsLookupProcessByProcessId, PID, &Process) || !Process)
 		return nullptr;
 
 	//take process lock
-	if (PsAcquireProcessExitSynchronization(Process))
+	if (ImpCall(PsAcquireProcessExitSynchronization, Process))
 	{
 		//process lock failed
-		ObfDereferenceObject(Process);
+		ImpCall(ObfDereferenceObject, Process);
 		return nullptr;
 	}
 
 	//attach to process
-	KeAttachProcess(Process);
+	ImpCall(KeAttachProcess, Process);
 	return Process;
 }
 
@@ -32,17 +41,17 @@ _FI void DetachFromProcess(PEPROCESS Process)
 	if (Process != nullptr)
 	{
 		//de-attach to process
-		KeDetachProcess();
+		ImpCall(KeDetachProcess);
 
 		//cleanup & process unlock
-		ObfDereferenceObject(Process);
-		PsReleaseProcessExitSynchronization(Process);
+		ImpCall(ObfDereferenceObject, Process);
+		ImpCall(PsReleaseProcessExitSynchronization, Process);
 	}
 }
 
 _FI void Sleep(LONG64 MSec) {
 	LARGE_INTEGER Delay; Delay.QuadPart = -MSec * 10000;
-	KeDelayExecutionThread(KernelMode, false, &Delay);
+	ImpCall(KeDelayExecutionThread, KernelMode, false, &Delay);
 }
 
 PVOID FindSection(PVOID ModBase, const char* Name, PULONG SectSize)
@@ -110,19 +119,19 @@ PUCHAR FindPatternSect(PVOID ModBase, const char* SectName, const char* Pattern)
 }
 
 _FI PVOID KAlloc(ULONG Size) {
-	PVOID Buff = ExAllocatePoolWithTag(NonPagedPoolNx, Size, 'KgxD');
+	PVOID Buff = ImpCall(ExAllocatePoolWithTag, NonPagedPoolNx, Size, 'KgxD');
 	MemZero(Buff, Size);
 	return Buff;
 }
 
 _FI void KFree(PVOID Ptr) {
-	ExFreePoolWithTag(Ptr, 'KgxD');
+	ImpCall(ExFreePoolWithTag, Ptr, 'KgxD');
 }
 
 PVOID GetUserModuleBase(PEPROCESS Process, const char* ModName, bool LoadDll = false)
 {
 	//get peb & ldr
-	PPEB PEB = PsGetProcessPeb(Process);
+	PPEB PEB = ImpCall(PsGetProcessPeb, Process);
 	if (!PEB || !PEB->Ldr) return nullptr;
 
 	//process modules list (with peb->ldr)
@@ -143,12 +152,12 @@ PVOID NQSI(SYSTEM_INFORMATION_CLASS Class)
 {
 	//get alloc size
 	NewTry: ULONG ReqSize = 0;
-	ZwQuerySystemInformation(Class, nullptr, ReqSize, &ReqSize);
+	ImpCall(ZwQuerySystemInformation, Class, nullptr, ReqSize, &ReqSize);
 	if (!ReqSize) goto NewTry;
 
 	//call QuerySystemInfo
 	PVOID pInfo = KAlloc(ReqSize);
-	if (!NT_SUCCESS(ZwQuerySystemInformation(Class, pInfo, ReqSize, &ReqSize))) {
+	if (!NT_SUCCESS(ImpCall(ZwQuerySystemInformation, Class, pInfo, ReqSize, &ReqSize))) {
 		KFree(pInfo); goto NewTry;
 	}
 
@@ -159,39 +168,39 @@ PVOID NQSI(SYSTEM_INFORMATION_CLASS Class)
 void CallUserMode(PVOID Func)
 {
 	//get user32 (KernelCallbackTable table ptr)
-	PEPROCESS Process = IoGetCurrentProcess();
+	PEPROCESS Process = ImpCall(IoGetCurrentProcess);
 	PVOID ModBase = GetUserModuleBase(Process, E("user32"));
 	PVOID DataSect = FindSection(ModBase, E(".data"), nullptr);
 	ULONG64 AllocPtr = ((ULONG64)DataSect + 0x2000 - 0x8);
-    ULONG64 CallBackPtr = (ULONG64)PsGetProcessPeb(Process)->KernelCallbackTable;
+    ULONG64 CallBackPtr = (ULONG64)ImpCall(PsGetProcessPeb, Process)->KernelCallbackTable;
 	ULONG Index = (ULONG)((AllocPtr - CallBackPtr) / 8);
 
 	//store func ptr in place
 	auto OldData = _InterlockedExchangePointer((PVOID*)AllocPtr, Func);
 
 	//enable apc (FIX BSOD)
-	KeLeaveGuardedRegion();
+	ImpCall(KeLeaveGuardedRegion);
 
 	//call usermode
 	union Garbage { ULONG ulong; PVOID pvoid; } Garbage;
-	KeUserModeCallback(Index, nullptr, 0, &Garbage.pvoid, &Garbage.ulong);
+	ImpCall(KeUserModeCallback, Index, nullptr, 0, &Garbage.pvoid, &Garbage.ulong);
 	
 	//store old ptr in place
 	_InterlockedExchangePointer((PVOID*)AllocPtr, OldData);
 
 	//disable apc
-	KeEnterGuardedRegion();
+	ImpCall(KeEnterGuardedRegion);
 }
 
 _FI PVOID UAlloc(ULONG Size, ULONG Protect = PAGE_READWRITE) {
 	PVOID AllocBase = nullptr; SIZE_T SizeUL = SizeAlign(Size);
-	ZwAllocateVirtualMemory(ZwCurrentProcess(), &AllocBase, 0, &SizeUL, MEM_COMMIT, Protect);
+	ImpCall(ZwAllocateVirtualMemory, ZwCurrentProcess(), &AllocBase, 0, &SizeUL, MEM_COMMIT, Protect);
 	return AllocBase;
 }
 
 _FI void UFree(PVOID Ptr) {
 	SIZE_T SizeUL = 0;
-	ZwFreeVirtualMemory(ZwCurrentProcess(), &Ptr, &SizeUL, MEM_RELEASE);
+	ImpCall(ZwFreeVirtualMemory, ZwCurrentProcess(), &Ptr, &SizeUL, MEM_RELEASE);
 }
 
 PEPROCESS GetProcessWModule(const char* ProcName, const char* ModName, PVOID* WaitModBase)
@@ -204,7 +213,7 @@ PEPROCESS GetProcessWModule(const char* ProcName, const char* ModName, PVOID* Wa
 	{
 		//get process name
 		const wchar_t* ProcessName = pInfoCur->ImageName.Buffer;
-		if (MmIsAddressValid((PVOID)ProcessName))
+		if (ImpCall(MmIsAddressValid, (PVOID)ProcessName))
 		{
 			//check process name
 			if (StrICmp(ProcName, ProcessName, true))
@@ -280,15 +289,6 @@ PVOID GetKernelModuleBase(const char* ModName)
 
 	KFree(ModuleList);
 	return ModuleBase;
-}
-
-template <typename Type>
-_FI Type EPtr(Type Ptr) {
-	auto Key = (ULONG64)SharedUserData->Cookie *
-		                SharedUserData->Cookie *
-		                SharedUserData->Cookie *
-		                SharedUserData->Cookie;
-	return (Type)((ULONG64)Ptr ^ Key);
 }
 
 template<typename Ret = void, typename... ArgT>

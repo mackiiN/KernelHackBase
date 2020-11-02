@@ -95,7 +95,7 @@ private:
     }
 
     _FI HGDIOBJ GetStockObjectInternal(ULONG Index) {
-        auto PEB = PsGetProcessPeb(IoGetCurrentProcess());
+        auto PEB = ImpCall(PsGetProcessPeb, ImpCall(IoGetCurrentProcess));
         auto GdiSharedHandleTable = *(ULONG64*)((ULONG64)PEB + 0xF8/*GdiSharedHandleTable*/);
         const auto ObjArray = (ULONG64*)(GdiSharedHandleTable + 0x1800B0/*in GetStockObject*/);
         return (HGDIOBJ)ObjArray[Index];
@@ -251,7 +251,8 @@ private:
         PVOID GreSetBkMode = (PVOID)RVA(FindPatternSect(win32kFull, E(".text"), E("E8 ? ? ? ? 89 45 7F")), 5);
         
         //create font desc
-        ENUMLOGFONTEXDVW EnumFont{};
+        ENUMLOGFONTEXDVW EnumFont; 
+        MemZero(&EnumFont, sizeof(ENUMLOGFONTEXDVW));
         EnumFont.elfEnumLogfontEx.elfLogFont.lfWeight = FW_MEDIUM;
         EnumFont.elfEnumLogfontEx.elfLogFont.lfHeight = FontSize * Scale;
         MemCpy(&EnumFont.elfEnumLogfontEx.elfLogFont.lfFaceName, (PVOID)FontName, (StrLen(FontName) + 1) * 2);

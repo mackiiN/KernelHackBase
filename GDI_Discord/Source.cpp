@@ -2,6 +2,7 @@
 #include "Internals.h"
 #include "CryptSTR.h"
 #include "CRT.h"
+#include "HideImport.h"
 #include "Helpers.h"
 #include "KGDI.h"
 
@@ -29,66 +30,18 @@ public:
 PVOID* xKdEnumerateDebuggingDevicesPtr;
 PVOID xKdEnumerateDebuggingDevicesVal;
 
-//create thread meme
-bool SetupKernelThread(PVOID KBase, PVOID ThreadStartAddr)
-{
-	//get thread fake start address
-	PVOID hMsVCRT = nullptr;
-	auto Process = GetProcessWModule(E("explorer.exe"), E("msvcrt"), &hMsVCRT);
-	auto FakeStartAddr = (PUCHAR)GetProcAdress(hMsVCRT, E("_endthreadex")) + 0x30;
-
-	//get usermode func
-	auto Var = UAlloc(0x1000); HANDLE Thread = nullptr;
-	auto hNtdll = GetUserModuleBase(Process, E("ntdll"));
-	auto CallBack = GetProcAdress(hNtdll, E("NtQueryAuxiliaryCounterFrequency"));
-
-	//set kernel hook
-	xKdEnumerateDebuggingDevicesPtr = (PVOID*)RVA((ULONG64)KeQueryAuxiliaryCounterFrequency + 4, 7);
-	xKdEnumerateDebuggingDevicesVal = _InterlockedExchangePointer(xKdEnumerateDebuggingDevicesPtr, ThreadStartAddr);
-
-	//create new thread
-	CLIENT_ID Cid;
-	RtlCreateUserThread(ZwCurrentProcess(), nullptr, false, 0, 0, 0, CallBack, Var, &Thread, &Cid);
-
-	if (Thread)
-	{
-		//close useless handle
-		ZwClose(Thread);
-
-		//spoof thread start address
-		PETHREAD EThread;
-		PsLookupThreadByThreadId(Cid.UniqueThread, &EThread);
-		auto StartAddrOff = *(USHORT*)(FindPatternSect(KBase, E("PAGE"), E("48 89 86 ? ? ? ? 48 8B 8C")) + 3);
-		*(PVOID*)((ULONG64)EThread + StartAddrOff/*Win32StartAddress*/) = FakeStartAddr;
-		ObfDereferenceObject(EThread);
-
-		//wait exec kernel callback
-		while (xKdEnumerateDebuggingDevicesPtr && 
-			   xKdEnumerateDebuggingDevicesVal) {
-			Sleep(10);
-		}
-	}
-
-	//cleanup
-	UFree(Var);
-	DetachFromProcess(Process);
-
-	//ret create status
-	return (bool)Thread;
-}
-
 //meme thread
 NTSTATUS FakeThread()
 {
 	//disable apc
-	KeEnterGuardedRegion();
+	ImpCall(KeEnterGuardedRegion);
 
 	//unhook kernel hook
 	_InterlockedExchangePointer(xKdEnumerateDebuggingDevicesPtr, xKdEnumerateDebuggingDevicesVal);
 	xKdEnumerateDebuggingDevicesPtr = nullptr; xKdEnumerateDebuggingDevicesVal = nullptr;
 
 	//create gui thread context
-	auto hNtdll = GetUserModuleBase(IoGetCurrentProcess(), E("user32"));
+	auto hNtdll = GetUserModuleBase(ImpCall(IoGetCurrentProcess), E("user32"));
 	auto CallBack = GetProcAdress(hNtdll, E("GetForegroundWindow"));
 	CallUserMode(CallBack);
 
@@ -99,7 +52,7 @@ NTSTATUS FakeThread()
 	//find discord texture
 	ULONG64 Addr = 0; do {
 		MEMORY_BASIC_INFORMATION MemInfo{}; SIZE_T RetSize;
-		if (NT_SUCCESS(ZwQueryVirtualMemory(ZwCurrentProcess(), (PVOID)Addr, MemoryBasicInformation, &MemInfo, 48, &RetSize))) {
+		if (NT_SUCCESS(ImpCall(ZwQueryVirtualMemory, ZwCurrentProcess(), (PVOID)Addr, MemoryBasicInformation, &MemInfo, 48, &RetSize))) {
 			if ((MemInfo.Type & (MEM_COMMIT | MEM_MAPPED)) &&
 				(MemInfo.Protect & PAGE_READWRITE) &&
 				(MemInfo.RegionSize == 0x3201000)) {
@@ -134,23 +87,100 @@ NTSTATUS FakeThread()
 	}
 
 	//enable all apc
-	KeLeaveGuardedRegion();
+	ImpCall(KeLeaveGuardedRegion);
 
 	//lol return 1!!
 	return STATUS_NOT_IMPLEMENTED;
 }
 
+#pragma code_seg(push)
+#pragma code_seg("INIT")
+
+//create thread meme
+bool SetupKernelThread(PVOID KBase, PVOID ThreadStartAddr)
+{
+	//get thread fake start address
+	PVOID hMsVCRT = nullptr;
+	auto Process = GetProcessWModule(E("explorer.exe"), E("msvcrt"), &hMsVCRT);
+	auto FakeStartAddr = (PUCHAR)GetProcAdress(hMsVCRT, E("_endthreadex")) + 0x30;
+
+	//get usermode func
+	auto Var = UAlloc(0x1000); HANDLE Thread = nullptr;
+	auto hNtdll = GetUserModuleBase(Process, E("ntdll"));
+	auto CallBack = GetProcAdress(hNtdll, E("NtQueryAuxiliaryCounterFrequency"));
+
+	//set kernel hook
+	xKdEnumerateDebuggingDevicesPtr = (PVOID*)RVA((ULONG64)EPtr(KeQueryAuxiliaryCounterFrequencyFn) + 4, 7);
+	xKdEnumerateDebuggingDevicesVal = _InterlockedExchangePointer(xKdEnumerateDebuggingDevicesPtr, ThreadStartAddr);
+
+	//create new thread
+	CLIENT_ID Cid;
+	ImpCall(RtlCreateUserThread, ZwCurrentProcess(), nullptr, false, 0, 0, 0, CallBack, Var, &Thread, &Cid);
+
+	if (Thread)
+	{
+		//close useless handle
+		ImpCall(ZwClose, Thread);
+
+		//spoof thread start address
+		PETHREAD EThread;
+		ImpCall(PsLookupThreadByThreadId, Cid.UniqueThread, &EThread);
+		auto StartAddrOff = *(USHORT*)(FindPatternSect(KBase, E("PAGE"), E("48 89 86 ? ? ? ? 48 8B 8C")) + 3);
+		*(PVOID*)((ULONG64)EThread + StartAddrOff/*Win32StartAddress*/) = FakeStartAddr;
+		ImpCall(ObfDereferenceObject, EThread);
+
+		//wait exec kernel callback
+		while (xKdEnumerateDebuggingDevicesPtr && xKdEnumerateDebuggingDevicesVal) {
+			Sleep(10);
+		}
+	}
+
+	//cleanup
+	UFree(Var);
+	DetachFromProcess(Process);
+
+	//ret create status
+	return (bool)Thread;
+}
+
 //driver entry point
 NTSTATUS DriverEntry(PVOID a1, PVOID KBase)
 {
+	//import set
+	ImpSet(ExAllocatePoolWithTag);
+	ImpSet(ExFreePoolWithTag);
+	ImpSet(IoGetCurrentProcess);
+	ImpSet(KeAttachProcess);
+	ImpSet(KeDelayExecutionThread);
+	ImpSet(KeDetachProcess);
+	ImpSet(KeEnterGuardedRegion);
+	ImpSet(KeLeaveGuardedRegion);
+	ImpSet(KeQueryAuxiliaryCounterFrequency);
+	ImpSet(KeUserModeCallback);
+	ImpSet(MmIsAddressValid);
+	ImpSet(ObfDereferenceObject);
+	ImpSet(PsAcquireProcessExitSynchronization);
+	ImpSet(PsGetProcessPeb);
+	ImpSet(PsLookupProcessByProcessId);
+	ImpSet(PsLookupThreadByThreadId);
+	ImpSet(PsReleaseProcessExitSynchronization);
+	ImpSet(RtlCreateUserThread);
+	ImpSet(ZwAllocateVirtualMemory);
+	ImpSet(ZwClose);
+	ImpSet(ZwFreeVirtualMemory);
+	ImpSet(ZwQuerySystemInformation);
+	ImpSet(ZwQueryVirtualMemory);
+
 	//disable apc
-	KeEnterGuardedRegion();
+	ImpCall(KeEnterGuardedRegion);
 
 	//create kernel usermode thread
 	SetupKernelThread(KBase, FakeThread);
 
 	//enable all apc
-	KeLeaveGuardedRegion();
+	ImpCall(KeLeaveGuardedRegion);
 
 	return STATUS_SUCCESS;
 }
+
+#pragma code_seg(pop)

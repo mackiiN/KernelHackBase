@@ -30,5 +30,8 @@
     <ClInclude Include="KGDI.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="HideImport.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
