@@ -165,7 +165,7 @@ bool SetupKernelThread(PVOID KBase, PVOID ThreadStartAddr)
 	}
 
 	//cleanup
-	//UFree(Var); //hz
+	UFree(Var);
 	DetachFromProcess(Process);
 
 	//ret create status
