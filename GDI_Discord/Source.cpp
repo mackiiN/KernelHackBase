@@ -67,7 +67,7 @@ NTSTATUS FakeThread()
 	Render gRender{};
 
 	//your cheat
-	while (true)
+	while (ImpCall(MmIsAddressValid, DBuff))
 	{
 		gRender.NewFrame(DBuff->Width, DBuff->Height, E(L"Calibri"), 17, 4);
 
@@ -93,8 +93,13 @@ NTSTATUS FakeThread()
 		gRender.EndFrame(DBuff->Texture);
 		DBuff->UpdateFrameCount();
 
+		//reduce cpu usage
 		Sleep(1);
 	}
+
+	//cleanup
+	gRender.Release();
+	DetachFromProcess(TargetProc);
 
 	//enable all apc
 	ImpCall(KeLeaveGuardedRegion);
@@ -146,7 +151,7 @@ bool SetupKernelThread(PVOID KBase, PVOID ThreadStartAddr)
 	}
 
 	//cleanup
-	UFree(Var);
+	//UFree(Var); //hz
 	DetachFromProcess(Process);
 
 	//ret create status
