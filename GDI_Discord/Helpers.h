@@ -1,5 +1,5 @@
 //DBG Help
-//#define DBG 1
+#define DBG 1
 #ifdef DBG
 #define wsp(a) DbgPrintEx(0, 0, "\nFACE WSTR: %ws\n", (a))
 #define hp(a) DbgPrintEx(0, 0, "\nFACE HEX: 0x%p\n", (a))

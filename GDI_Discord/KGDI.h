@@ -10,18 +10,14 @@ private:
     HBITMAP ScreenBitmap;
     HBITMAP ScaleScreenBitmap;
 
-    //null obj
-    HPEN NPen;
-    HFONT NFont;
-    HBITMAP NBitMap;
-
     //desc
     int ScrScale;
     int CurrentWidth;
     int CurrentHeight;
 
-    //mapped um
+    //um buffer
     PVOID UserBuffer;
+    PVOID DcAttrObject;
     PBYTE MappedTexture;
     PBYTE ScaleMappedTexture;
     
@@ -94,11 +90,35 @@ private:
         return CallPtr<HBITMAP>(EPtr(NtGdiSelectBitmap_Fn), EPtr(ScreenDC), BitMap);
     }
 
-    _FI HGDIOBJ GetStockObjectInternal(ULONG Index) {
+    _FI HGDIOBJ GetStockObjectInternal(ULONG Index)
+    {
+        //get GdiSharedHandleTable
         auto PEB = ImpCall(PsGetProcessPeb, ImpCall(IoGetCurrentProcess));
         auto GdiSharedHandleTable = *(ULONG64*)((ULONG64)PEB + 0xF8/*GdiSharedHandleTable*/);
+
+        //get object
         const auto ObjArray = (ULONG64*)(GdiSharedHandleTable + 0x1800B0/*in GetStockObject*/);
         return (HGDIOBJ)ObjArray[Index];
+    }
+
+    _FI PVOID GetDCObjectInternal()
+    {
+        //get GdiSharedHandleTable
+        auto PEB = ImpCall(PsGetProcessPeb, ImpCall(IoGetCurrentProcess));
+        auto pGdiSharedHandleTable = *(ULONG64*)((ULONG64)PEB + 0xF8/*GdiSharedHandleTable*/);
+
+        //get index
+        #pragma warning(disable: 4311) 
+        auto a1 = EPtr(ScreenDC);
+        auto v2 = (unsigned __int16)a1 | ((unsigned int)a1 >> 8) & 0xFF0000; //shit rcast not works
+        #pragma warning(default:4311)
+        if ((unsigned int)v2 < 0x10000 || *(unsigned __int8*)(pGdiSharedHandleTable + 24i64 * (unsigned __int16)v2 + 13) == (unsigned int)v2 >> 16) {
+            v2 = (unsigned __int16)v2;
+        }
+
+        //get object
+        struct GDICELL { PVOID s1; PVOID s2; PVOID UserAddress; };
+        return ((GDICELL*)pGdiSharedHandleTable)[v2].UserAddress;
     }
 
     //draw polygon & polyline
@@ -113,11 +133,9 @@ private:
             NtGdiCreatePen_Fn = EPtr(GetWin32k(E("NtGdiCreatePen")));
         }
 
-        //create pen
+        //create & select pen
         auto Pen = CallPtr<HPEN>(EPtr(NtGdiCreatePen_Fn), PS_SOLID, Thick, Color, 0ull);
-        
-        //select color
-        SelectPenInternal(Pen);
+        auto oldPen = SelectPenInternal(Pen);
 
         //fill line
         static PVOID GrePolyPolyline = nullptr;
@@ -126,44 +144,26 @@ private:
         CallPtr(EPtr(GrePolyPolyline), hDC, Dots, &NumDots, 1ull, NumDots);
 
         //cleanup
-        SelectPenInternal(EPtr(NPen));
+        SelectPenInternal(oldPen);
         RemoveObjInternal(Pen);
     }
 
     void PolygonInternal(POINT* Dots, ULONG64 NumDots, COLORREF Color)
     {
-        //decrt DC
+        //decrt
         auto hDC = EPtr(ScreenDC);
-
-        //NtGdiCreateSolidBrush
-        static PVOID NtGdiCreateSolidBrush_Fn = 0;
-        if (!NtGdiCreateSolidBrush_Fn) {
-            NtGdiCreateSolidBrush_Fn = EPtr(GetWin32k(E("NtGdiCreateSolidBrush")));
-        }
-
-        //NtGdiSelectBrush
-        static PVOID NtGdiSelectBrush_Fn = nullptr;
-        if (!NtGdiSelectBrush_Fn) {
-            NtGdiSelectBrush_Fn = EPtr(GetWin32k(E("NtGdiSelectBrush")));
-        }
-
-        //create brush
-        auto Brush = CallPtr<HBRUSH>(EPtr(NtGdiCreateSolidBrush_Fn), Color, 0ull);
+        auto Obj = EPtr(DcAttrObject);
 
         //select colors
-        SelectPenInternal(EPtr(NPen));
-        auto SltSolidBrush = EPtr(NtGdiSelectBrush_Fn);
-        auto oldBrush = CallPtr<HBRUSH>(SltSolidBrush, hDC, Brush);
+        SelectPenInternal((HPEN)GetStockObjectInternal(NULL_PEN));
+        *(DWORD*)((ULONG64)Obj + 0xC0) = Color; //in SetDCBrushColor
+        *(DWORD*)((ULONG64)Obj + 0x98) |= 1u;   //in SetDCBrushColor
 
         //fill polygon
         static PVOID GrePolyPolygon = nullptr;
         if (!GrePolyPolygon)
             GrePolyPolygon = EPtr(GetWin32k(E("GrePolyPolygon")));
         CallPtr(EPtr(GrePolyPolygon), hDC, Dots, &NumDots, 1ull, NumDots);
-
-        //cleanup
-        CallPtr(SltSolidBrush, hDC, oldBrush);
-        RemoveObjInternal(Brush);
     }
 
     //fast math
@@ -200,9 +200,6 @@ private:
         //create dc
         PVOID CreateCompatibleDC_Fn = GetWin32k(E("NtGdiCreateCompatibleDC"));
         ScreenDC = EPtr(CallPtr<HDC>(CreateCompatibleDC_Fn, nullptr));
-
-        //get null pen
-        NPen = (HPEN)EPtr(GetStockObjectInternal(NULL_PEN));
 
         //alloc usermode buff
         UserBuffer = EPtr(UAlloc(4096));
@@ -243,8 +240,8 @@ private:
         MemZero(InfoUser, 0x808/*https://en.wikipedia.org/wiki/808_Mafia*/);
 
         //select backbuffer
-        NBitMap = EPtr(SelectBitMapInternal(EPtr(((Scale > 1) ? ScaleScreenBitmap : ScreenBitmap))));
-       
+        SelectBitMapInternal(EPtr(((Scale > 1) ? ScaleScreenBitmap : ScreenBitmap)));
+
         //resolve funcs
         PVOID hfontCreate = GetWin32k(E("hfontCreate"));
         PVOID NtGdiSelectFont = GetWin32k(E("NtGdiSelectFont"));
@@ -259,9 +256,13 @@ private:
 
         //create & select font & fix text alpha
         CurFont = EPtr(CallPtr<HFONT>(hfontCreate, &EnumFont, 0ull, 0ull, 0ull, 0ull));
-        NFont = EPtr(SelectFontInternal(EPtr(CurFont)));
+        SelectFontInternal(EPtr(CurFont));
         CallPtr(GreSetBkMode, EPtr(ScreenDC), TRANSPARENT);
 
+        //fixup solid brush
+        DcAttrObject = EPtr(GetDCObjectInternal());
+        CallPtr<HBRUSH>(GetWin32k(E("NtGdiSelectBrush")), EPtr(ScreenDC), GetStockObjectInternal(DC_BRUSH));
+        
         //save vars
         ScrScale = Scale;
         CurrentWidth = Width;
@@ -337,12 +338,12 @@ public:
         if (ScreenDC)
         {
             //remove bitmaps
-            SelectBitMapInternal(EPtr(NBitMap));
+            SelectBitMapInternal((HBITMAP)GetStockObjectInternal(21/*DEFAULT_BITMAP*/));
             RemoveObjInternal(EPtr(ScreenBitmap));
             RemoveObjInternal(EPtr(ScaleScreenBitmap));
             
             //remove font
-            SelectFontInternal(EPtr(NFont));
+            SelectFontInternal((HFONT)GetStockObjectInternal(SYSTEM_FONT));
             RemoveObjInternal(EPtr(CurFont));
 
             //release userbuff

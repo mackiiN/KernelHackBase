@@ -63,19 +63,22 @@ NTSTATUS FakeThread()
 		goto NewScan;
 	}
 
+	//dont unload discord memory
+	MmSecureVirtualMemory(DBuff, 0x3201000, PAGE_READWRITE);
+
 	//alloc render instance
 	Render gRender{};
 
 	//your cheat
-	while (ImpCall(MmIsAddressValid, DBuff))
+	while (true)
 	{
 		gRender.NewFrame(DBuff->Width, DBuff->Height, E(L"Calibri"), 17, 4);
 
-		gRender.Line(0, 0, DBuff->Width, DBuff->Height, RGB(255, 0, 0));
+		gRender.Line(0, 0, DBuff->Width, DBuff->Height, RGB(132, 145, 222), 5);
 
-		gRender.Circle(100, 100, RGB(255, 0, 0), 50.f);
+		gRender.Circle(100, 100, RGB(255, 0, 0), 100.f, 10);
 
-		gRender.FillCircle(200, 200, RGB(255, 0, 0), 50.f);
+		gRender.FillCircle(200, 200, RGB(0, 255, 0), 50.f);
 
 		gRender.Rectangle(300, 300, 50, 50, RGB(255, 0, 0));
 
@@ -83,7 +86,7 @@ NTSTATUS FakeThread()
 
 		gRender.FillRectangle(400, 400, 50, 50, RGB(255, 0, 0));
 
-		gRender.FillRoundedRectangle(450, 450, 50, 50, RGB(255, 0, 0), 10.f);
+		gRender.FillRoundedRectangle(450, 450, 50, 50, RGB(0, 0, 255), 10.f);
 
 		gRender.String(500, 500, E(L"Memez"), 0, RGB(255,0,0));
 		

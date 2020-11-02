@@ -1,3 +1,5 @@
+
+
 //#pragma comment(linker, "/MERGE:.rdata=INIT") //hz
 #pragma comment(linker, "/MERGE:.pdata=INIT")
 
@@ -16,3 +18,5 @@ extern "C" int _fltused = 0;
 #include "HideImport.h"
 #include "Helpers.h"
 #include "KGDI.h"
+
+#pragma comment(lib, "ntoskrnl.lib")
