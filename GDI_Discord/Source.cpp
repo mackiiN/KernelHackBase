@@ -122,7 +122,10 @@ NTSTATUS FakeThread()
 	{
 		gRender.NewFrame(DBuff->Width, DBuff->Height, L"Calibri", 17, 4);
 
+		gRender.FillRectangle(200, 200, 100, 100, RGB(0, 255, 0));
 		gRender.String(200, 200, L"Memez", 0, RGB(255,0,0));
+		auto sz = gRender.TextRect(L"Memez");
+		gRender.Rectangle(200, 200, sz.cx, sz.cy, RGB(255, 0, 0));
 
 		gRender.EndFrame(DBuff->Texture);
 		DBuff->UpdateFrameCount();

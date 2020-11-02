@@ -1,52 +1,97 @@
 #include <wingdi.h>
 
-PVOID ResolveWin32k(const char* Name)
-{
-    //win32kfull
-    auto win32kFull = GetKernelModuleBase(E("win32kfull.sys"));
-    auto func = GetProcAdress(win32kFull, Name);
-
-    //win32kbase
-    if (!func) {
-        auto win32kBase = GetKernelModuleBase(E("win32kbase.sys"));
-        func = GetProcAdress(win32kBase, Name);
-    }
-
-    //win32k
-    if (!func) {
-        auto win32k = GetKernelModuleBase(E("win32k.sys"));
-        func = GetProcAdress(win32k, Name);
-    }
-
-    return func;
-}
-
 //render
 class Render
 {
 private:
-    HFONT Font;
+    //obj
     HDC ScreenDC;
-    HPEN NullPen;
-    int ScrScale;
-    PVOID UserBuffer;
-
-    int CurrentWidth;
-    int CurrentHeight;
-    PBYTE MappedTexture;
+    HFONT CurFont;
     HBITMAP ScreenBitmap;
-    PBYTE ScaleMappedTexture;
     HBITMAP ScaleScreenBitmap;
 
-    //internals
-    HPEN CreatePenInternal(int Style, int Width, COLORREF Color)
+    //null obj
+    HPEN NPen;
+    HFONT NFont;
+    HBITMAP NBitMap;
+
+    //desc
+    int ScrScale;
+    int CurrentWidth;
+    int CurrentHeight;
+
+    //mapped um
+    PVOID UserBuffer;
+    PBYTE MappedTexture;
+    PBYTE ScaleMappedTexture;
+    
+    //shared internals
+    PVOID GetWin32k(const char* Name)
     {
-        static PVOID NtGdiCreatePen_Fn = nullptr;
-        if (!NtGdiCreatePen_Fn) {
-            NtGdiCreatePen_Fn = EPtr(ResolveWin32k(E("NtGdiCreatePen")));
+        //win32kfull
+        auto win32kFull = GetKernelModuleBase(E("win32kfull.sys"));
+        auto func = GetProcAdress(win32kFull, Name);
+
+        //win32kbase
+        if (!func) {
+            auto win32kBase = GetKernelModuleBase(E("win32kbase.sys"));
+            func = GetProcAdress(win32kBase, Name);
         }
 
-        return CallPtr<HPEN>(EPtr(NtGdiCreatePen_Fn), Style, Width, Color, 0);
+        //win32k
+        if (!func) {
+            auto win32k = GetKernelModuleBase(E("win32k.sys"));
+            func = GetProcAdress(win32k, Name);
+        }
+
+        return func;
+    }
+
+    HPEN SelectPenInternal(HPEN hPen)
+    {
+        static PVOID NtGdiSelectPen_Fn = nullptr;
+        if (!NtGdiSelectPen_Fn) {
+            NtGdiSelectPen_Fn = EPtr(GetWin32k(E("NtGdiSelectPen")));
+        }
+
+        //call NtGdiSelectPen
+        return CallPtr<HPEN>(EPtr(NtGdiSelectPen_Fn), EPtr(ScreenDC), hPen);
+    }
+
+    void RemoveObjInternal(HGDIOBJ Obj)
+    {
+        if (Obj)
+        {
+            static PVOID DeleteObject_Fn = nullptr;
+            if (!DeleteObject_Fn) {
+                DeleteObject_Fn = EPtr(GetWin32k(E("NtGdiDeleteObjectApp")));
+            }
+
+            //call NtGdiDeleteObjectApp
+            CallPtr(EPtr(DeleteObject_Fn), Obj);
+        }
+    }
+
+    HFONT SelectFontInternal(HFONT hFont)
+    {
+        static PVOID NtGdiSelectFont_Fn = nullptr;
+        if (!NtGdiSelectFont_Fn) {
+            NtGdiSelectFont_Fn = EPtr(GetWin32k(E("NtGdiSelectFont")));
+        }
+
+        //call NtGdiSelectFont
+        return CallPtr<HFONT>(EPtr(NtGdiSelectFont_Fn), EPtr(ScreenDC), hFont);
+    }
+
+    HBITMAP SelectBitMapInternal(HBITMAP BitMap)
+    {
+        static PVOID NtGdiSelectBitmap_Fn = nullptr;
+        if (!NtGdiSelectBitmap_Fn) {
+            NtGdiSelectBitmap_Fn = EPtr(GetWin32k(E("NtGdiSelectBitmap")));
+        }
+
+        //call NtGdiSelectBitmap
+        return CallPtr<HBITMAP>(EPtr(NtGdiSelectBitmap_Fn), EPtr(ScreenDC), BitMap);
     }
 
     _FI HGDIOBJ GetStockObjectInternal(ULONG Index) {
@@ -56,57 +101,32 @@ private:
         return (HGDIOBJ)ObjArray[Index];
     }
 
-    HBRUSH SelectBrushInternal(HDC hDC, HBRUSH hBrush)
-    {
-        static PVOID NtGdiSelectBrush_Fn = nullptr;
-        if (!NtGdiSelectBrush_Fn) {
-            NtGdiSelectBrush_Fn = EPtr(ResolveWin32k(E("NtGdiSelectBrush")));
-        }
-
-        return CallPtr<HBRUSH>(EPtr(NtGdiSelectBrush_Fn), hDC, hBrush);
-    }
-
-    HPEN SelectPenInternal(HDC hDC, HPEN hPen)
-    {
-        static PVOID NtGdiSelectPen_Fn = nullptr;
-        if (!NtGdiSelectPen_Fn) {
-            NtGdiSelectPen_Fn = EPtr(ResolveWin32k(E("NtGdiSelectPen")));
-        }
-
-        return CallPtr<HPEN>(EPtr(NtGdiSelectPen_Fn), hDC, hPen);
-    }
-
-    void RemoveObjInternal(HGDIOBJ Obj)
-    {
-        if (Obj)
-        {
-            static PVOID DeleteObject_Fn = nullptr;
-            if (!DeleteObject_Fn) {
-                DeleteObject_Fn = EPtr(ResolveWin32k(E("NtGdiDeleteObjectApp")));
-            }
-
-            CallPtr(EPtr(DeleteObject_Fn), Obj);
-        }
-    }
-
+    //draw polygon & polyline
     void PolyLineInternal(POINT* Dots, ULONG64 NumDots, int Thick, COLORREF Color)
     {
         //decrt DC
         auto hDC = EPtr(ScreenDC);
 
-        //create pen
-        auto Pen = CreatePenInternal(0/*PS_SOLID*/, Thick, Color);
+        //NtGdiCreatePen
+        static PVOID NtGdiCreatePen_Fn = nullptr;
+        if (!NtGdiCreatePen_Fn) {
+            NtGdiCreatePen_Fn = EPtr(GetWin32k(E("NtGdiCreatePen")));
+        }
 
+        //create pen
+        auto Pen = CallPtr<HPEN>(EPtr(NtGdiCreatePen_Fn), PS_SOLID, Thick, Color, 0ull);
+        
         //select color
-        SelectPenInternal(hDC, Pen);
+        SelectPenInternal(Pen);
 
         //fill line
         static PVOID GrePolyPolyline = nullptr;
         if (!GrePolyPolyline)
-            GrePolyPolyline = EPtr(ResolveWin32k(E("GrePolyPolyline")));
+            GrePolyPolyline = EPtr(GetWin32k(E("GrePolyPolyline")));
         CallPtr(EPtr(GrePolyPolyline), hDC, Dots, &NumDots, 1ull, NumDots);
 
         //cleanup
+        SelectPenInternal(EPtr(NPen));
         RemoveObjInternal(Pen);
     }
 
@@ -118,37 +138,35 @@ private:
         //NtGdiCreateSolidBrush
         static PVOID NtGdiCreateSolidBrush_Fn = 0;
         if (!NtGdiCreateSolidBrush_Fn) {
-            NtGdiCreateSolidBrush_Fn = EPtr(ResolveWin32k(E("NtGdiCreateSolidBrush")));
+            NtGdiCreateSolidBrush_Fn = EPtr(GetWin32k(E("NtGdiCreateSolidBrush")));
+        }
+
+        //NtGdiSelectBrush
+        static PVOID NtGdiSelectBrush_Fn = nullptr;
+        if (!NtGdiSelectBrush_Fn) {
+            NtGdiSelectBrush_Fn = EPtr(GetWin32k(E("NtGdiSelectBrush")));
         }
 
         //create brush
-        auto Brush = CallPtr<HBRUSH>(EPtr(NtGdiCreateSolidBrush_Fn), Color, 0);
+        auto Brush = CallPtr<HBRUSH>(EPtr(NtGdiCreateSolidBrush_Fn), Color, 0ull);
 
         //select colors
-        SelectPenInternal(hDC, EPtr(NullPen));
-        SelectBrushInternal(hDC, Brush);
+        SelectPenInternal(EPtr(NPen));
+        auto SltSolidBrush = EPtr(NtGdiSelectBrush_Fn);
+        auto oldBrush = CallPtr<HBRUSH>(SltSolidBrush, hDC, Brush);
 
         //fill polygon
         static PVOID GrePolyPolygon = nullptr;
         if (!GrePolyPolygon)
-            GrePolyPolygon = EPtr(ResolveWin32k(E("GrePolyPolygon")));
+            GrePolyPolygon = EPtr(GetWin32k(E("GrePolyPolygon")));
         CallPtr(EPtr(GrePolyPolygon), hDC, Dots, &NumDots, 1ull, NumDots);
 
         //cleanup
+        CallPtr(SltSolidBrush, hDC, oldBrush);
         RemoveObjInternal(Brush);
     }
 
-    HBITMAP SelectBitMapInternal(HBITMAP BitMap)
-    {
-        static PVOID NtGdiSelectBitmap_Fn = nullptr;
-        if(!NtGdiSelectBitmap_Fn){
-            NtGdiSelectBitmap_Fn = EPtr(ResolveWin32k(E("NtGdiSelectBitmap")));
-        }
-        
-        return CallPtr<HBITMAP>(EPtr(NtGdiSelectBitmap_Fn), EPtr(ScreenDC), BitMap);
-    }
-
-    //Fast Math
+    //fast math
     _FI float CosAdd(float x) {
         float x2 = x * x;
         const float c1 = 0.99940307f;
@@ -176,21 +194,20 @@ private:
         return FastCos(1.57f - angle);
     }
 
-public:
-    //mgr
+    //setup
     void Init(int Width, int Height, const wchar_t* FontName, int FontSize, int Scale)
     {
         //create dc
-        PVOID CreateCompatibleDC_Fn = ResolveWin32k(E("NtGdiCreateCompatibleDC"));
+        PVOID CreateCompatibleDC_Fn = GetWin32k(E("NtGdiCreateCompatibleDC"));
         ScreenDC = EPtr(CallPtr<HDC>(CreateCompatibleDC_Fn, nullptr));
 
-        //get null pen & null brush
-        NullPen = (HPEN)EPtr(GetStockObjectInternal(NULL_PEN));
+        //get null pen
+        NPen = (HPEN)EPtr(GetStockObjectInternal(NULL_PEN));
 
         //alloc usermode buff
         UserBuffer = EPtr(UAlloc(4096));
 
-        //create bitmap (org size)
+        //create bitmap (normal size)
         PBITMAPINFO InfoUser = (PBITMAPINFO)EPtr(UserBuffer);
         InfoUser->bmiHeader.biSize = 40;
         InfoUser->bmiHeader.biWidth = Width;
@@ -200,44 +217,48 @@ public:
         InfoUser->bmiHeader.biCompression = 0;
         InfoUser->bmiHeader.biSizeImage = Width * Height * 4;
         PVOID* MappedTextureUser = (PVOID*)((ULONG64)InfoUser + 0x800);
-        PVOID NtGdiCreateDIBSection_Fn = ResolveWin32k(E("NtGdiCreateDIBSection"));
+        PVOID NtGdiCreateDIBSection_Fn = GetWin32k(E("NtGdiCreateDIBSection"));
         ScreenBitmap = EPtr(CallPtr<HBITMAP>(NtGdiCreateDIBSection_Fn, EPtr(ScreenDC), nullptr, 0, InfoUser, 0, 40, 0, 0, MappedTextureUser));
         MappedTexture = EPtr((PBYTE)*MappedTextureUser);
 
-        //get w32k base
+        //get w32k base (for resolve many functions)
         auto win32kFull = GetKernelModuleBase(E("win32kfull.sys"));
 
-        //add scale
+        //need scale
         if (Scale > 1)
         {
-            //create bitmap (scale size)
-            InfoUser->bmiHeader.biWidth = Width * Scale;
+            //create bitmap (normal size * scale)
+            InfoUser->bmiHeader.biWidth = (Width * Scale);
             InfoUser->bmiHeader.biHeight = -(Height * Scale);
             InfoUser->bmiHeader.biSizeImage = (Width * Scale) * (Height * Scale) * 4;
             ScaleScreenBitmap = EPtr(CallPtr<HBITMAP>(NtGdiCreateDIBSection_Fn, EPtr(ScreenDC), nullptr, 0, InfoUser, 0, 40, 0, 0, MappedTextureUser));
             ScaleMappedTexture = EPtr((PBYTE)*MappedTextureUser);
-            
-            //GreSetStretchBltMode
+
+            //GreSetStretchBltMode (FIX MIXING COLORS, SLOW)
             auto GreSetStretchBltMode = (PVOID)RVA(FindPatternSect(win32kFull, E(".text"), E("E8 ? ? ? ? 48 8B D7 89 84")), 5);
             CallPtr(GreSetStretchBltMode, EPtr(ScreenDC), HALFTONE);
-        } 
-        
+        }
+
         //cleanup
         MemZero(InfoUser, 0x808/*https://en.wikipedia.org/wiki/808_Mafia*/);
 
         //select backbuffer
-        RemoveObjInternal(SelectBitMapInternal(EPtr(((Scale > 1) ? ScaleScreenBitmap : ScreenBitmap))));
-
-        //create & select font
+        NBitMap = EPtr(SelectBitMapInternal(EPtr(((Scale > 1) ? ScaleScreenBitmap : ScreenBitmap))));
+       
+        //resolve funcs
+        PVOID hfontCreate = GetWin32k(E("hfontCreate"));
+        PVOID NtGdiSelectFont = GetWin32k(E("NtGdiSelectFont"));
+        PVOID GreSetBkMode = (PVOID)RVA(FindPatternSect(win32kFull, E(".text"), E("E8 ? ? ? ? 89 45 7F")), 5);
+        
+        //create font desc
         ENUMLOGFONTEXDVW EnumFont{};
         EnumFont.elfEnumLogfontEx.elfLogFont.lfWeight = FW_MEDIUM;
         EnumFont.elfEnumLogfontEx.elfLogFont.lfHeight = FontSize * Scale;
         MemCpy(&EnumFont.elfEnumLogfontEx.elfLogFont.lfFaceName, (PVOID)FontName, (StrLen(FontName) + 1) * 2);
-        PVOID hfontCreate = ResolveWin32k(E("hfontCreate"));
-        PVOID NtGdiSelectFont = ResolveWin32k(E("NtGdiSelectFont"));
-        PVOID GreSetBkMode = (PVOID)RVA(FindPatternSect(win32kFull, E(".text"), E("E8 ? ? ? ? 89 45 7F")), 5);
-        Font = EPtr(CallPtr<HFONT>(hfontCreate, &EnumFont, 0ull, 0ull, 0ull, 0ull));
-        CallPtr<HFONT>(NtGdiSelectFont, EPtr(ScreenDC), EPtr(Font));
+
+        //create & select font & fix text alpha
+        CurFont = EPtr(CallPtr<HFONT>(hfontCreate, &EnumFont, 0ull, 0ull, 0ull, 0ull));
+        NFont = EPtr(SelectFontInternal(EPtr(CurFont)));
         CallPtr(GreSetBkMode, EPtr(ScreenDC), TRANSPARENT);
 
         //save vars
@@ -246,8 +267,11 @@ public:
         CurrentHeight = Height;
     }
 
+public:
+    //mgr
     _FI void NewFrame(int Width, int Height, const wchar_t* FontName, int FontSize, int ExtraSample = 1)
     {
+        //need init/reinit
         if ((Width != CurrentWidth) || (Height != CurrentHeight)) 
         {
             //cleanup
@@ -260,28 +284,28 @@ public:
 
     void EndFrame(PBYTE Buffer)
     {
-        //apply extrasampling (if need)
+        //apply extrasampling
         if (ScrScale > 1)
         {
-            //select original bitmap
+            //select original size bitmap
             auto SBitMap = SelectBitMapInternal(EPtr(ScreenBitmap));
 
             //NtGdiStretchDIBitsInternal
-            static PVOID NtGdiStretchDIBitsInternal_Fn = 0;
+            static PVOID NtGdiStretchDIBitsInternal_Fn = nullptr;
             if (!NtGdiStretchDIBitsInternal_Fn) {
-                NtGdiStretchDIBitsInternal_Fn = EPtr(ResolveWin32k(E("NtGdiStretchDIBitsInternal")));
+                NtGdiStretchDIBitsInternal_Fn = EPtr(GetWin32k(E("NtGdiStretchDIBitsInternal")));
             }
 
-            //resize bitmap
+            //create desc bitmap
             PBITMAPINFO InfoUser = (PBITMAPINFO)EPtr(UserBuffer);
             InfoUser->bmiHeader.biSize = 40;
-            InfoUser->bmiHeader.biWidth = (CurrentWidth * ScrScale);
-            InfoUser->bmiHeader.biHeight = -(CurrentHeight * ScrScale);
             InfoUser->bmiHeader.biPlanes = 1;
             InfoUser->bmiHeader.biBitCount = 32;
-            InfoUser->bmiHeader.biCompression = 0;
+            InfoUser->bmiHeader.biWidth = (CurrentWidth * ScrScale);
+            InfoUser->bmiHeader.biHeight = -(CurrentHeight * ScrScale);
             InfoUser->bmiHeader.biSizeImage = (CurrentWidth * ScrScale) * (CurrentHeight * ScrScale) * 4;
-            CallPtr(EPtr(NtGdiStretchDIBitsInternal_Fn), EPtr(ScreenDC), 0, 0, CurrentWidth, CurrentHeight, 0, 0, CurrentWidth * ScrScale, CurrentHeight * ScrScale, EPtr(ScaleMappedTexture), InfoUser, 0, SRCCOPY, 40, InfoUser->bmiHeader.biSizeImage, 0ull);
+            CallPtr(EPtr(NtGdiStretchDIBitsInternal_Fn), EPtr(ScreenDC), 0, 0, CurrentWidth, CurrentHeight, 0, 0,
+                CurrentWidth * ScrScale, CurrentHeight * ScrScale, EPtr(ScaleMappedTexture), InfoUser, 0, SRCCOPY, 40, InfoUser->bmiHeader.biSizeImage, 0ull);
             
             //cleanup & restore bitmap
             MemZero(InfoUser, sizeof(BITMAPINFO));
@@ -306,12 +330,27 @@ public:
         }
     }
 
-    void Release() {
-        RemoveObjInternal(EPtr(ScaleScreenBitmap));
-        RemoveObjInternal(EPtr(ScreenBitmap));
-        RemoveObjInternal(EPtr(ScreenDC));
-        RemoveObjInternal(EPtr(Font));
-        UFree(UserBuffer);
+    void Release() 
+    {
+        //if need
+        if (ScreenDC)
+        {
+            //remove bitmaps
+            SelectBitMapInternal(EPtr(NBitMap));
+            RemoveObjInternal(EPtr(ScreenBitmap));
+            RemoveObjInternal(EPtr(ScaleScreenBitmap));
+            
+            //remove font
+            SelectFontInternal(EPtr(NFont));
+            RemoveObjInternal(EPtr(CurFont));
+
+            //release userbuff
+            UFree(UserBuffer);
+
+            //remove screen dc
+            RemoveObjInternal(EPtr(ScreenDC));
+            ScreenDC = nullptr;
+        }
     }
 
     //render line
@@ -509,9 +548,18 @@ public:
         CallPtr(EPtr(GreExtTextOutWInternal), hDC, x, y, 0ull, 0ull, String, StrLen(String), 0ull, 0ull);
     }
 
-   /* Vector2 GetTextSize(const wchar_t* String) {
-        SIZE TextSize = { 0 };
-        CallPtr<bool>(GreGetTextExtentW, ScreenDC, String, StrLen(String), &TextSize);
-        return { FLOAT(TextSize.cx), FLOAT(TextSize.cy) };
-    }*/
+    SIZE TextRect(const wchar_t* String)
+    {
+        //resolve function
+        static PVOID GreGetTextExtentW = nullptr;
+        if (!GreGetTextExtentW) {
+            auto win32kFull = GetKernelModuleBase(E("win32kfull.sys"));
+            GreGetTextExtentW = (PVOID)EPtr(RVA(FindPatternSect(win32kFull, E(".text"), E("E8 ? ? ? ? 8B D8 41 83 FD 10")), 5));
+        }
+       
+        //get text size
+        SIZE TextRect{};
+        CallPtr(EPtr(GreGetTextExtentW), EPtr(ScreenDC), String, StrLen(String), &TextRect, 1);
+        return SIZE{ TextRect.cx / ScrScale, TextRect.cy / ScrScale }; //fix scale
+    }
 };
