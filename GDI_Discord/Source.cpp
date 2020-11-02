@@ -1,10 +1,4 @@
 #include "Global.h"
-#include "Internals.h"
-#include "CryptSTR.h"
-#include "CRT.h"
-#include "HideImport.h"
-#include "Helpers.h"
-#include "KGDI.h"
 
 class DiscordTexture
 {
@@ -30,6 +24,8 @@ public:
 PVOID* xKdEnumerateDebuggingDevicesPtr;
 PVOID xKdEnumerateDebuggingDevicesVal;
 
+#define GameProc "ConsoleApplication8.exe"
+
 //meme thread
 NTSTATUS FakeThread()
 {
@@ -47,7 +43,7 @@ NTSTATUS FakeThread()
 
 	//get target process
 	NewScan: DiscordTexture* DBuff = nullptr;
-	auto TargetProc = GetProcessWModule("ConsoleApplication8.exe", E("DiscordHook64"), nullptr);
+	auto TargetProc = GetProcessWModule(E(GameProc), E("DiscordHook64"), nullptr);
 
 	//find discord texture
 	ULONG64 Addr = 0; do {
@@ -73,12 +69,26 @@ NTSTATUS FakeThread()
 	//your cheat
 	while (true)
 	{
-		gRender.NewFrame(DBuff->Width, DBuff->Height, L"Calibri", 17, 4);
+		gRender.NewFrame(DBuff->Width, DBuff->Height, E(L"Calibri"), 17, 4);
 
-		gRender.FillRectangle(200, 200, 100, 100, RGB(0, 255, 0));
-		gRender.String(200, 200, L"Memez", 0, RGB(255,0,0));
-		auto sz = gRender.TextRect(L"Memez");
-		gRender.Rectangle(200, 200, sz.cx, sz.cy, RGB(255, 0, 0));
+		gRender.Line(0, 0, DBuff->Width, DBuff->Height, RGB(255, 0, 0));
+
+		gRender.Circle(100, 100, RGB(255, 0, 0), 50.f);
+
+		gRender.FillCircle(200, 200, RGB(255, 0, 0), 50.f);
+
+		gRender.Rectangle(300, 300, 50, 50, RGB(255, 0, 0));
+
+		gRender.RoundedRectangle(350, 350, 50, 50, RGB(255, 0, 0), 10.f);
+
+		gRender.FillRectangle(400, 400, 50, 50, RGB(255, 0, 0));
+
+		gRender.FillRoundedRectangle(450, 450, 50, 50, RGB(255, 0, 0), 10.f);
+
+		gRender.String(500, 500, E(L"Memez"), 0, RGB(255,0,0));
+		
+		auto sz = gRender.TextRect(E(L"Memez"));
+		gRender.Rectangle(500, 500, sz.cx, sz.cy, RGB(255, 0, 0));
 
 		gRender.EndFrame(DBuff->Texture);
 		DBuff->UpdateFrameCount();

@@ -1,4 +1,5 @@
 //DBG Help
+//#define DBG 1
 #ifdef DBG
 #define wsp(a) DbgPrintEx(0, 0, "\nFACE WSTR: %ws\n", (a))
 #define hp(a) DbgPrintEx(0, 0, "\nFACE HEX: 0x%p\n", (a))
@@ -6,6 +7,7 @@
 #define dp(a) DbgPrintEx(0, 0, "\nFACE DEC: %d\n", (a))
 #endif
 
+//ptr utils
 template <typename Type>
 _FI Type EPtr(Type Ptr) {
 	auto Key = (ULONG64)SharedUserData->Cookie *
@@ -15,45 +17,24 @@ _FI Type EPtr(Type Ptr) {
 	return (Type)((ULONG64)Ptr ^ Key);
 }
 
-_FI PEPROCESS AttachToProcess(HANDLE PID)
-{
-	//get eprocess
-	PEPROCESS Process = nullptr;
-	if (ImpCall(PsLookupProcessByProcessId, PID, &Process) || !Process)
-		return nullptr;
-
-	//take process lock
-	if (ImpCall(PsAcquireProcessExitSynchronization, Process))
-	{
-		//process lock failed
-		ImpCall(ObfDereferenceObject, Process);
-		return nullptr;
-	}
-
-	//attach to process
-	ImpCall(KeAttachProcess, Process);
-	return Process;
+template<typename Ret = void, typename... ArgT>
+_FI Ret CallPtr(PVOID Fn, ArgT... Args) {
+	typedef Ret(*ShellFn)(ArgT...);
+	return ((ShellFn)Fn)(Args...);
 }
 
-_FI void DetachFromProcess(PEPROCESS Process)
-{
-	//check valid process
-	if (Process != nullptr)
-	{
-		//de-attach to process
-		ImpCall(KeDetachProcess);
-
-		//cleanup & process unlock
-		ImpCall(ObfDereferenceObject, Process);
-		ImpCall(PsReleaseProcessExitSynchronization, Process);
-	}
+//kernel memory utils
+_FI PVOID KAlloc(ULONG Size) {
+	PVOID Buff = ImpCall(ExAllocatePoolWithTag, NonPagedPoolNx, Size, 'KgxD');
+	MemZero(Buff, Size);
+	return Buff;
 }
 
-_FI void Sleep(LONG64 MSec) {
-	LARGE_INTEGER Delay; Delay.QuadPart = -MSec * 10000;
-	ImpCall(KeDelayExecutionThread, KernelMode, false, &Delay);
+_FI void KFree(PVOID Ptr) {
+	ImpCall(ExFreePoolWithTag, Ptr, 'KgxD');
 }
 
+//basic utils
 PVOID FindSection(PVOID ModBase, const char* Name, PULONG SectSize)
 {
 	//get & enum sections
@@ -118,40 +99,10 @@ PUCHAR FindPatternSect(PVOID ModBase, const char* SectName, const char* Pattern)
 	return nullptr;
 }
 
-_FI PVOID KAlloc(ULONG Size) {
-	PVOID Buff = ImpCall(ExAllocatePoolWithTag, NonPagedPoolNx, Size, 'KgxD');
-	MemZero(Buff, Size);
-	return Buff;
-}
-
-_FI void KFree(PVOID Ptr) {
-	ImpCall(ExFreePoolWithTag, Ptr, 'KgxD');
-}
-
-PVOID GetUserModuleBase(PEPROCESS Process, const char* ModName, bool LoadDll = false)
-{
-	//get peb & ldr
-	PPEB PEB = ImpCall(PsGetProcessPeb, Process);
-	if (!PEB || !PEB->Ldr) return nullptr;
-
-	//process modules list (with peb->ldr)
-	for (PLIST_ENTRY pListEntry = PEB->Ldr->InLoadOrderModuleList.Flink;
-					 pListEntry != &PEB->Ldr->InLoadOrderModuleList;
-					 pListEntry = pListEntry->Flink)
-	{
-		PLDR_DATA_TABLE_ENTRY pEntry = CONTAINING_RECORD(pListEntry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
-		if (StrICmp(ModName, pEntry->BaseDllName.Buffer, false))
-			return pEntry->DllBase;
-	}
-
-	//no module
-	return nullptr;
-}
-
 PVOID NQSI(SYSTEM_INFORMATION_CLASS Class)
 {
 	//get alloc size
-	NewTry: ULONG ReqSize = 0;
+NewTry: ULONG ReqSize = 0;
 	ImpCall(ZwQuerySystemInformation, Class, nullptr, ReqSize, &ReqSize);
 	if (!ReqSize) goto NewTry;
 
@@ -165,31 +116,86 @@ PVOID NQSI(SYSTEM_INFORMATION_CLASS Class)
 	return pInfo;
 }
 
-void CallUserMode(PVOID Func)
+PVOID GetProcAdress(PVOID ModBase, const char* Name)
 {
-	//get user32 (KernelCallbackTable table ptr)
-	PEPROCESS Process = ImpCall(IoGetCurrentProcess);
-	PVOID ModBase = GetUserModuleBase(Process, E("user32"));
-	PVOID DataSect = FindSection(ModBase, E(".data"), nullptr);
-	ULONG64 AllocPtr = ((ULONG64)DataSect + 0x2000 - 0x8);
-    ULONG64 CallBackPtr = (ULONG64)ImpCall(PsGetProcessPeb, Process)->KernelCallbackTable;
-	ULONG Index = (ULONG)((AllocPtr - CallBackPtr) / 8);
+	//parse headers
+	PIMAGE_NT_HEADERS NT_Head = NT_HEADER(ModBase);
+	PIMAGE_EXPORT_DIRECTORY ExportDir = (PIMAGE_EXPORT_DIRECTORY)((ULONG64)ModBase + NT_Head->OptionalHeader.DataDirectory[0].VirtualAddress);
 
-	//store func ptr in place
-	auto OldData = _InterlockedExchangePointer((PVOID*)AllocPtr, Func);
+	//process records
+	for (ULONG i = 0; i < ExportDir->NumberOfNames; i++)
+	{
+		//get ordinal & name
+		USHORT Ordinal = ((USHORT*)((ULONG64)ModBase + ExportDir->AddressOfNameOrdinals))[i];
+		const char* ExpName = (const char*)ModBase + ((ULONG*)((ULONG64)ModBase + ExportDir->AddressOfNames))[i];
 
-	//enable apc (FIX BSOD)
-	ImpCall(KeLeaveGuardedRegion);
+		//check export name
+		if (StrICmp(Name, ExpName, true))
+			return (PVOID)((ULONG64)ModBase + ((ULONG*)((ULONG64)ModBase + ExportDir->AddressOfFunctions))[Ordinal]);
+	}
 
-	//call usermode
-	union Garbage { ULONG ulong; PVOID pvoid; } Garbage;
-	ImpCall(KeUserModeCallback, Index, nullptr, 0, &Garbage.pvoid, &Garbage.ulong);
-	
-	//store old ptr in place
-	_InterlockedExchangePointer((PVOID*)AllocPtr, OldData);
+	//no export
+	return nullptr;
+}
 
-	//disable apc
-	ImpCall(KeEnterGuardedRegion);
+_FI void Sleep(LONG64 MSec) {
+	LARGE_INTEGER Delay; Delay.QuadPart = -MSec * 10000;
+	ImpCall(KeDelayExecutionThread, KernelMode, false, &Delay);
+}
+
+//process utils
+_FI PEPROCESS AttachToProcess(HANDLE PID)
+{
+	//get eprocess
+	PEPROCESS Process = nullptr;
+	if (ImpCall(PsLookupProcessByProcessId, PID, &Process) || !Process)
+		return nullptr;
+
+	//take process lock
+	if (ImpCall(PsAcquireProcessExitSynchronization, Process))
+	{
+		//process lock failed
+		ImpCall(ObfDereferenceObject, Process);
+		return nullptr;
+	}
+
+	//attach to process
+	ImpCall(KeAttachProcess, Process);
+	return Process;
+}
+
+_FI void DetachFromProcess(PEPROCESS Process)
+{
+	//check valid process
+	if (Process != nullptr)
+	{
+		//de-attach to process
+		ImpCall(KeDetachProcess);
+
+		//cleanup & process unlock
+		ImpCall(ObfDereferenceObject, Process);
+		ImpCall(PsReleaseProcessExitSynchronization, Process);
+	}
+}
+
+PVOID GetUserModuleBase(PEPROCESS Process, const char* ModName)
+{
+	//get peb & ldr
+	PPEB PEB = ImpCall(PsGetProcessPeb, Process);
+	if (!PEB || !PEB->Ldr) return nullptr;
+
+	//process modules list (with peb->ldr)
+	for (PLIST_ENTRY pListEntry = PEB->Ldr->InLoadOrderModuleList.Flink;
+		pListEntry != &PEB->Ldr->InLoadOrderModuleList;
+		pListEntry = pListEntry->Flink)
+	{
+		PLDR_DATA_TABLE_ENTRY pEntry = CONTAINING_RECORD(pListEntry, LDR_DATA_TABLE_ENTRY, InLoadOrderLinks);
+		if (StrICmp(ModName, pEntry->BaseDllName.Buffer, false))
+			return pEntry->DllBase;
+	}
+
+	//no module
+	return nullptr;
 }
 
 _FI PVOID UAlloc(ULONG Size, ULONG Protect = PAGE_READWRITE) {
@@ -203,6 +209,34 @@ _FI void UFree(PVOID Ptr) {
 	ImpCall(ZwFreeVirtualMemory, ZwCurrentProcess(), &Ptr, &SizeUL, MEM_RELEASE);
 }
 
+void CallUserMode(PVOID Func)
+{
+	//get user32 (KernelCallbackTable table ptr)
+	PEPROCESS Process = ImpCall(IoGetCurrentProcess);
+	PVOID ModBase = GetUserModuleBase(Process, E("user32"));
+	PVOID DataSect = FindSection(ModBase, E(".data"), nullptr);
+	ULONG64 AllocPtr = ((ULONG64)DataSect + 0x2000 - 0x8);
+	ULONG64 CallBackPtr = (ULONG64)ImpCall(PsGetProcessPeb, Process)->KernelCallbackTable;
+	ULONG Index = (ULONG)((AllocPtr - CallBackPtr) / 8);
+
+	//store func ptr in place
+	auto OldData = _InterlockedExchangePointer((PVOID*)AllocPtr, Func);
+
+	//enable apc (FIX BSOD)
+	ImpCall(KeLeaveGuardedRegion);
+
+	//call usermode
+	union Garbage { ULONG ulong; PVOID pvoid; } Garbage;
+	ImpCall(KeUserModeCallback, Index, nullptr, 0, &Garbage.pvoid, &Garbage.ulong);
+
+	//store old ptr in place
+	_InterlockedExchangePointer((PVOID*)AllocPtr, OldData);
+
+	//disable apc
+	ImpCall(KeEnterGuardedRegion);
+}
+
+//kernel utils
 PEPROCESS GetProcessWModule(const char* ProcName, const char* ModName, PVOID* WaitModBase)
 {
 	//get process list
@@ -251,32 +285,12 @@ PEPROCESS GetProcessWModule(const char* ProcName, const char* ModName, PVOID* Wa
 	return EProc;
 }
 
-PVOID GetProcAdress(PVOID ModBase, const char* Name)
-{
-	//parse headers
-	PIMAGE_NT_HEADERS NT_Head = NT_HEADER(ModBase);
-	PIMAGE_EXPORT_DIRECTORY ExportDir = (PIMAGE_EXPORT_DIRECTORY)((ULONG64)ModBase + NT_Head->OptionalHeader.DataDirectory[0].VirtualAddress);
-
-	//process records
-	for (ULONG i = 0; i < ExportDir->NumberOfNames; i++)
-	{
-		//get ordinal & name
-		USHORT Ordinal = ((USHORT*)((ULONG64)ModBase + ExportDir->AddressOfNameOrdinals))[i];
-		const char* ExpName = (const char*)ModBase + ((ULONG*)((ULONG64)ModBase + ExportDir->AddressOfNames))[i];
-
-		//check export name
-		if (StrICmp(Name, ExpName, true))
-			return (PVOID)((ULONG64)ModBase + ((ULONG*)((ULONG64)ModBase + ExportDir->AddressOfFunctions))[Ordinal]);
-	}
-
-	//no export
-	return nullptr;
-}
-
 PVOID GetKernelModuleBase(const char* ModName)
 {
+	//get module list
 	PSYSTEM_MODULE_INFORMATION ModuleList = (PSYSTEM_MODULE_INFORMATION)NQSI(SystemModuleInformation);
 
+	//process module list
 	PVOID ModuleBase = 0;
 	for (ULONG64 i = 0; i < ModuleList->ulModuleCount; i++)
 	{
@@ -287,12 +301,7 @@ PVOID GetKernelModuleBase(const char* ModName)
 		}
 	}
 
+	//cleanup
 	KFree(ModuleList);
 	return ModuleBase;
-}
-
-template<typename Ret = void, typename... ArgT>
-_FI Ret CallPtr(PVOID Fn, ArgT... Args) {
-	typedef Ret(*ShellFn)(ArgT...);
-	return ((ShellFn)Fn)(Args...);
 }
