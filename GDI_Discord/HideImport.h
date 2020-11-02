@@ -25,4 +25,5 @@ ImpDef(ZwAllocateVirtualMemory);
 ImpDef(ZwClose);
 ImpDef(ZwFreeVirtualMemory);
 ImpDef(ZwQuerySystemInformation);
-ImpDef(ZwQueryVirtualMemory);
+ImpDef(ZwQueryVirtualMemory); 
+ImpDef(MmSecureVirtualMemory);

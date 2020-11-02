@@ -198,8 +198,7 @@ private:
     void Init(int Width, int Height, const wchar_t* FontName, int FontSize, int Scale)
     {
         //create dc
-        PVOID CreateCompatibleDC_Fn = GetWin32k(E("NtGdiCreateCompatibleDC"));
-        ScreenDC = EPtr(CallPtr<HDC>(CreateCompatibleDC_Fn, nullptr));
+        ScreenDC = EPtr(CallPtr<HDC>(GetWin32k(E("NtGdiCreateCompatibleDC")), nullptr));
 
         //alloc usermode buff
         UserBuffer = EPtr(UAlloc(4096));
@@ -242,11 +241,6 @@ private:
         //select backbuffer
         SelectBitMapInternal(EPtr(((Scale > 1) ? ScaleScreenBitmap : ScreenBitmap)));
 
-        //resolve funcs
-        PVOID hfontCreate = GetWin32k(E("hfontCreate"));
-        PVOID NtGdiSelectFont = GetWin32k(E("NtGdiSelectFont"));
-        PVOID GreSetBkMode = (PVOID)RVA(FindPatternSect(win32kFull, E(".text"), E("E8 ? ? ? ? 89 45 7F")), 5);
-        
         //create font desc
         ENUMLOGFONTEXDVW EnumFont; 
         MemZero(&EnumFont, sizeof(ENUMLOGFONTEXDVW));
@@ -254,9 +248,12 @@ private:
         EnumFont.elfEnumLogfontEx.elfLogFont.lfHeight = FontSize * Scale;
         MemCpy(&EnumFont.elfEnumLogfontEx.elfLogFont.lfFaceName, (PVOID)FontName, (StrLen(FontName) + 1) * 2);
 
-        //create & select font & fix text alpha
-        CurFont = EPtr(CallPtr<HFONT>(hfontCreate, &EnumFont, 0ull, 0ull, 0ull, 0ull));
+        //create & select font
+        CurFont = EPtr(CallPtr<HFONT>(GetWin32k(E("hfontCreate")), &EnumFont, 0ull, 0ull, 0ull, 0ull));
         SelectFontInternal(EPtr(CurFont));
+
+        //fix text alpha
+        PVOID GreSetBkMode = (PVOID)RVA(FindPatternSect(win32kFull, E(".text"), E("E8 ? ? ? ? 89 45 7F")), 5);
         CallPtr(GreSetBkMode, EPtr(ScreenDC), TRANSPARENT);
 
         //fixup solid brush

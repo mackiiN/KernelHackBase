@@ -57,14 +57,15 @@ NTSTATUS FakeThread()
 		} else Addr += PAGE_SIZE;
 	} while (Addr < (ULONG_PTR)0x7FFFFFFEFFFFi64);
 
-	//check found buffer
+	//check buffer
 	if (!DBuff) {
 		DetachFromProcess(TargetProc);
+		Sleep(1);
 		goto NewScan;
 	}
 
-	//dont unload discord memory
-	MmSecureVirtualMemory(DBuff, 0x3201000, PAGE_READWRITE);
+	//don't unload discord memory
+	ImpCall(MmSecureVirtualMemory, DBuff, 0x3201000, PAGE_READWRITE);
 
 	//alloc render instance
 	Render gRender{};
@@ -72,6 +73,17 @@ NTSTATUS FakeThread()
 	//your cheat
 	while (true)
 	{
+		//acquire process lock & check process died
+		if (ImpCall(PsAcquireProcessExitSynchronization, TargetProc)) {
+			DetachFromProcess(TargetProc);
+			break;
+		}
+
+		//discord ne prosral`sa
+		if (!DBuff->Width || !DBuff->Height)
+			goto ReleaseProcessLockSleep;
+
+		//start frame (render)
 		gRender.NewFrame(DBuff->Width, DBuff->Height, E(L"Calibri"), 17, 4);
 
 		gRender.Line(0, 0, DBuff->Width, DBuff->Height, RGB(132, 145, 222), 5);
@@ -93,16 +105,15 @@ NTSTATUS FakeThread()
 		auto sz = gRender.TextRect(E(L"Memez"));
 		gRender.Rectangle(500, 500, sz.cx, sz.cy, RGB(255, 0, 0));
 
+		//end frame (copy)
 		gRender.EndFrame(DBuff->Texture);
 		DBuff->UpdateFrameCount();
 
-		//reduce cpu usage
+		//unlock process & wait
+		ReleaseProcessLockSleep:
+		ImpCall(PsReleaseProcessExitSynchronization, TargetProc);
 		Sleep(1);
 	}
-
-	//cleanup
-	gRender.Release();
-	DetachFromProcess(TargetProc);
 
 	//enable all apc
 	ImpCall(KeLeaveGuardedRegion);
@@ -187,7 +198,8 @@ NTSTATUS DriverEntry(PVOID a1, PVOID KBase)
 	ImpSet(ZwClose);
 	ImpSet(ZwFreeVirtualMemory);
 	ImpSet(ZwQuerySystemInformation);
-	ImpSet(ZwQueryVirtualMemory);
+	ImpSet(ZwQueryVirtualMemory); 
+	ImpSet(MmSecureVirtualMemory);
 
 	//disable apc
 	ImpCall(KeEnterGuardedRegion);

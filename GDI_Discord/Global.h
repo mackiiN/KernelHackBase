@@ -1,5 +1,3 @@
-
-
 //#pragma comment(linker, "/MERGE:.rdata=INIT") //hz
 #pragma comment(linker, "/MERGE:.pdata=INIT")
 
