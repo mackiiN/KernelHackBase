@@ -253,7 +253,7 @@ private:
         SelectFontInternal(EPtr(CurFont));
 
         //fix text alpha
-        PVOID GreSetBkMode = (PVOID)RVA(FindPatternSect(win32kFull, E(".text"), E("E8 ? ? ? ? 89 45 7F")), 5);
+        PVOID GreSetBkMode = (PVOID)RVA(FindPatternSect(win32kFull, E(".text"), E("E8 ? ? ? ? 89 45 7F 85")), 5);
         CallPtr(GreSetBkMode, EPtr(ScreenDC), TRANSPARENT);
 
         //fixup solid brush
@@ -344,7 +344,7 @@ public:
             RemoveObjInternal(EPtr(CurFont));
 
             //release userbuff
-            UFree(UserBuffer);
+            UFree(EPtr(UserBuffer));
 
             //remove screen dc
             RemoveObjInternal(EPtr(ScreenDC));

@@ -24,7 +24,7 @@ public:
 PVOID* xKdEnumerateDebuggingDevicesPtr;
 PVOID xKdEnumerateDebuggingDevicesVal;
 
-#define GameProc "ConsoleApplication8.exe"
+#define GameProc "TestEnvironment.exe"
 
 //meme thread
 NTSTATUS FakeThread()
@@ -98,7 +98,7 @@ NTSTATUS FakeThread()
 
 		gRender.FillRectangle(400, 400, 50, 50, RGB(255, 0, 0));
 
-		gRender.FillRoundedRectangle(450, 450, 50, 50, RGB(0, 0, 255), 10.f);
+		gRender.FillRoundedRectangle(450, 450, 50, 50, RGB(100, 0, 255), 10.f);
 
 		gRender.String(500, 500, E(L"Memez"), 0, RGB(255,0,0));
 		
